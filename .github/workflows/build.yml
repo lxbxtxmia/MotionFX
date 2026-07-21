@@ -42,4 +42,4 @@ jobs:
       - name: List built files
         run: find build -maxdepth 4 -type f | sort
       - name: Run GUI resize test
-        run: xvfb-run -a ./build/MotionFXGuiTest_artefacts/Release/MotionFXGuiTest
+        run: xvfb-run -a ./build/MotionFXGuiTest_artefacts/MotionFXGuiTest
