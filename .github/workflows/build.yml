@@ -39,5 +39,7 @@ jobs:
         run: cmake --build build --target MotionFX_VST3 MotionFXAudioTest MotionFXGuiTest
       - name: Run audio integrity test
         run: ./build/MotionFXAudioTest
+      - name: List built files
+        run: find build -maxdepth 4 -type f | sort
       - name: Run GUI resize test
-        run: xvfb-run -a ./build/MotionFXGuiTest
+        run: xvfb-run -a ./build/MotionFXGuiTest_artefacts/Release/MotionFXGuiTest
