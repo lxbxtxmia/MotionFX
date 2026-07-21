@@ -30,7 +30,16 @@ bool MotionFXAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
         && layouts.getMainInputChannelSet()  == juce::AudioChannelSet::stereo();
 }
 
-static mfx::SyncDiv toDiv (int idx) noexcept { return (mfx::SyncDiv) juce::jlimit (0, 9, idx); }
+static mfx::SyncDiv toDiv (int idx) noexcept
+{
+    return (mfx::SyncDiv) juce::jlimit (0, mfx::syncDivCount - 1, idx);
+}
+
+static float freeRateToHz (float value, int unit) noexcept
+{
+    // Unit 0 = cycles per second, unit 1 = seconds per cycle.
+    return unit == 1 ? 1.0f / juce::jmax (0.01f, value) : value;
+}
 
 void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& prefix, int numSamples)
 {
@@ -50,7 +59,8 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
     mod.depth = raw ("moddepth") / 100.0f;
 
     mod.lfo.setParams ((mfx::LfoShape) (int) raw ("lfo_shape"), raw ("lfo_synced") > 0.5f,
-                        raw ("lfo_rate"), toDiv ((int) raw ("lfo_div")), false);
+                        freeRateToHz (raw ("lfo_rate"), (int) raw ("lfo_rateunit")),
+                        toDiv ((int) raw ("lfo_div")), false);
 
     switch ((int) raw ("motion_shape"))
     {
@@ -61,13 +71,16 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
         default: mod.motion.setFlat(); break;
     }
     mod.motion.setParams ((mfx::MotionMode) (int) raw ("motion_mode"), raw ("motion_synced") > 0.5f,
-                           raw ("motion_rate"), toDiv ((int) raw ("motion_div")), raw ("motion_smooth") / 100.0f);
+                           freeRateToHz (raw ("motion_rate"), (int) raw ("motion_rateunit")),
+                           toDiv ((int) raw ("motion_div")), raw ("motion_smooth") / 100.0f);
 
     mod.env.setTimes (raw ("env_attack"), raw ("env_release"));
 
     int numSteps = (int) raw ("seq_numsteps");
     mod.seq.setNumSteps (numSteps);
-    mod.seq.setParams (raw ("seq_synced") > 0.5f, raw ("seq_rate"), toDiv ((int) raw ("seq_div")), raw ("seq_smooth"));
+    mod.seq.setParams (raw ("seq_synced") > 0.5f,
+                       freeRateToHz (raw ("seq_rate"), (int) raw ("seq_rateunit")),
+                       toDiv ((int) raw ("seq_div")), raw ("seq_smooth"));
     for (int i = 0; i < numSteps; ++i)
     {
         auto* v = apvts.getRawParameterValue (prefix + "_seq_step" + juce::String (i));

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(MotionFX VERSION 0.3.0)
+project(MotionFX VERSION 0.4.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -89,3 +89,12 @@ target_link_libraries(MotionFXGuiTest PRIVATE
     juce::juce_gui_basics
     juce::juce_gui_extra
 )
+
+
+# Register the executables with CTest so CI actually executes them.
+include(CTest)
+enable_testing()
+add_test(NAME MotionFXAudioIntegrity COMMAND MotionFXAudioTest)
+add_test(NAME MotionFXGuiResize COMMAND MotionFXGuiTest)
+set_tests_properties(MotionFXAudioIntegrity PROPERTIES TIMEOUT 300)
+set_tests_properties(MotionFXGuiResize PROPERTIES TIMEOUT 90)

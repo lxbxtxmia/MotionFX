@@ -30,11 +30,12 @@ namespace mfx
                      const juce::String& labelText, juce::Colour accent)
         {
             slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 16);
+            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 20);
             slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
             slider.setColour (juce::Slider::textBoxTextColourId, Palette::text);
             slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
             slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            slider.setTooltip (labelText + " - double-click the value to type it");
             addAndMakeVisible (slider);
 
             label.setText (labelText, juce::dontSendNotification);
@@ -42,23 +43,30 @@ namespace mfx
             label.setColour (juce::Label::textColourId, Palette::textDim);
             addAndMakeVisible (label);
 
-            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, paramId, slider);
-
-            if (auto* parameter = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (paramId)))
+            auto* parameter = apvts.getParameter (paramId);
+            const int decimals = dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr ? 0 : 2;
+            slider.setNumDecimalPlacesToDisplay (decimals);
+            slider.textFromValueFunction = [decimals] (double value)
             {
-                const auto interval = parameter->getNormalisableRange().interval;
-                slider.setNumDecimalPlacesToDisplay (interval >= 1.0f ? 0 : 3);
-            }
+                return juce::String (value, decimals);
+            };
+            slider.valueFromTextFunction = [] (const juce::String& text)
+            {
+                return text.getDoubleValue();
+            };
+
+            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, paramId, slider);
         }
 
         void resized() override
         {
             auto b = getLocalBounds();
-            label.setBounds (b.removeFromBottom (16));
+            label.setBounds (b.removeFromBottom (18));
             slider.setBounds (b);
         }
 
         EditableSlider slider;
+
     private:
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;

@@ -135,6 +135,47 @@ int main()
     std::cout << "Factory presets found: " << numFactory << " (expect 16)" << std::endl;
     if (numFactory != 16) { std::cout << "  [FAIL] preset count mismatch" << std::endl; ++failures; }
 
+
+    // Block 4 timing choices and absolute Stutter repeat lengths.
+    if (mfx::syncDivChoices().size() != mfx::syncDivCount)
+    {
+        std::cout << "  [FAIL] sync division UI/DSP count mismatch" << std::endl;
+        ++failures;
+    }
+
+    const auto nearlyEqual = [] (double a, double b) { return std::abs (a - b) < 1.0e-6; };
+    if (! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_4D), 1.5)
+        || ! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_4T), 2.0 / 3.0)
+        || ! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_16D), 0.375))
+    {
+        std::cout << "  [FAIL] dotted/triplet sync conversion mismatch" << std::endl;
+        ++failures;
+    }
+
+    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })
+    {
+        const juce::String prefix (id);
+        for (auto* suffix : { "lfo_rateunit", "motion_rateunit", "seq_rateunit" })
+        {
+            if (proc.apvts.getParameter (prefix + "_" + suffix) == nullptr)
+            {
+                std::cout << "  [FAIL] missing timing unit parameter " << prefix << "_" << suffix << std::endl;
+                ++failures;
+            }
+        }
+    }
+
+    mfx::StutterEngine stutterTimingTest;
+    stutterTimingTest.prepare (48000.0);
+    if (stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat4, 120.0) != 24000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat8, 120.0) != 12000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat16, 120.0) != 6000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat32, 120.0) != 3000)
+    {
+        std::cout << "  [FAIL] Stutter repeat lengths are not absolute musical divisions" << std::endl;
+        ++failures;
+    }
+
     // Init must be a genuinely clean starting point: every processing module and hidden sync toggle disabled.
     proc.presetManager.loadInitPreset();
     for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })

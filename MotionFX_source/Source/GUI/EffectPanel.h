@@ -9,7 +9,7 @@ namespace mfx
         juce::String displayName;
         juce::Colour accent;
         juce::String modeParamId;
-        std::vector<std::pair<juce::String, juce::String>> secondaryKnobs; // paramId -> label
+        std::vector<std::pair<juce::String, juce::String>> secondaryKnobs;
     };
 
     class EffectPanel : public juce::Component, private juce::Timer
@@ -19,157 +19,258 @@ namespace mfx
             : apvts (s), chain (c), theSpec (std::move (spec)), id (effectId)
         {
             enableToggle = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_enabled", "ON");
-            addAndMakeVisible (*enableToggle);
-
             modeCombo = std::make_unique<LabeledCombo> (apvts, theSpec.modeParamId, "MODE");
-            addAndMakeVisible (*modeCombo);
-
             primaryKnob = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_base", "AMOUNT", theSpec.accent);
+            addAndMakeVisible (*enableToggle);
+            addAndMakeVisible (*modeCombo);
             addAndMakeVisible (*primaryKnob);
 
             for (auto& sk : theSpec.secondaryKnobs)
             {
-                auto k = std::make_unique<LabeledKnob> (apvts, sk.first, sk.second, theSpec.accent);
-                addAndMakeVisible (*k);
-                secondaryKnobs.push_back (std::move (k));
+                auto knob = std::make_unique<LabeledKnob> (apvts, sk.first, sk.second, theSpec.accent);
+                addAndMakeVisible (*knob);
+                secondaryKnobs.push_back (std::move (knob));
             }
 
             visualizer = std::make_unique<ModVisualizer> (chain.uiModValue[(size_t) id], theSpec.accent);
             addAndMakeVisible (*visualizer);
 
-            // --- left modulation panel ---
             modSourceCombo = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_modsource", "MOD SOURCE");
-            addAndMakeVisible (*modSourceCombo);
             modDepthKnob = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_moddepth", "DEPTH", theSpec.accent);
+            addAndMakeVisible (*modSourceCombo);
             addAndMakeVisible (*modDepthKnob);
 
             lfoShape = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_lfo_shape", "SHAPE");
-            lfoSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_lfo_synced", "SYNC");
-            lfoRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_lfo_rate", "RATE Hz", theSpec.accent);
+            lfoSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_lfo_synced", "TEMPO SYNC");
+            lfoRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_lfo_rate", "RATE", theSpec.accent);
+            lfoRateUnit = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_lfo_rateunit", "UNIT");
             lfoDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_lfo_div", "DIVISION");
-            for (auto* c2 : { (juce::Component*) lfoShape.get(), (juce::Component*) lfoSynced.get(),
-                              (juce::Component*) lfoRate.get(), (juce::Component*) lfoDiv.get() })
-                addAndMakeVisible (c2);
+            addComponents ({ lfoShape.get(), lfoSynced.get(), lfoRate.get(), lfoRateUnit.get(), lfoDiv.get() });
 
-            envAttack = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_attack", "ATTACK", theSpec.accent);
-            envRelease = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_release", "RELEASE", theSpec.accent);
-            addAndMakeVisible (*envAttack); addAndMakeVisible (*envRelease);
+            envAttack = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_attack", "ATTACK ms", theSpec.accent);
+            envRelease = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_release", "RELEASE ms", theSpec.accent);
+            addComponents ({ envAttack.get(), envRelease.get() });
 
             motionShape = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_motion_shape", "SHAPE");
             motionMode = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_motion_mode", "MODE");
-            motionSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_motion_synced", "SYNC");
-            motionRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_motion_rate", "RATE Hz", theSpec.accent);
+            motionSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_motion_synced", "TEMPO SYNC");
+            motionRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_motion_rate", "RATE", theSpec.accent);
+            motionRateUnit = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_motion_rateunit", "UNIT");
             motionDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_motion_div", "DIVISION");
             motionSmooth = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_motion_smooth", "SMOOTH", theSpec.accent);
-            for (auto* c2 : { (juce::Component*) motionShape.get(), (juce::Component*) motionMode.get(), (juce::Component*) motionSynced.get(),
-                              (juce::Component*) motionRate.get(), (juce::Component*) motionDiv.get(), (juce::Component*) motionSmooth.get() })
-                addAndMakeVisible (c2);
+            addComponents ({ motionShape.get(), motionMode.get(), motionSynced.get(), motionRate.get(),
+                             motionRateUnit.get(), motionDiv.get(), motionSmooth.get() });
 
             seqSteps = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_numsteps", "STEPS", theSpec.accent);
             seqSteps->slider.setSliderStyle (juce::Slider::LinearHorizontal);
-            seqSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_seq_synced", "SYNC");
-            seqRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_rate", "RATE Hz", theSpec.accent);
-            seqDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_seq_div", "DIVISION");
-            seqSmooth = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_smooth", "SMOOTH", theSpec.accent);
-            for (auto* c2 : { (juce::Component*) seqSteps.get(), (juce::Component*) seqSynced.get(),
-                              (juce::Component*) seqRate.get(), (juce::Component*) seqDiv.get(), (juce::Component*) seqSmooth.get() })
-                addAndMakeVisible (c2);
+            seqSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_seq_synced", "TEMPO SYNC");
+            seqRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_rate", "RATE", theSpec.accent);
+            seqRateUnit = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_seq_rateunit", "UNIT");
+            seqDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_seq_div", "STEP DIVISION");
+            seqSmooth = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_smooth", "SMOOTH ms", theSpec.accent);
+            addComponents ({ seqSteps.get(), seqSynced.get(), seqRate.get(), seqRateUnit.get(), seqDiv.get(), seqSmooth.get() });
 
             seqGrid = std::make_unique<StepBarGrid> (apvts, theSpec.prefix + "_seq_step", theSpec.accent);
             seqGrid->setCurrentStepProvider ([this] { return chain.slots[(size_t) id].mod.seq.getCurrentStepIndex(); });
             addAndMakeVisible (*seqGrid);
 
-            startTimerHz (12);
+            startTimerHz (15);
             refreshModContextVisibility();
         }
 
         void resized() override
         {
-            auto b = getLocalBounds().reduced (10);
-
-            auto left = b.removeFromLeft (juce::jmax (170, (int) (b.getWidth() * 0.28f)));
-            b.removeFromLeft (10);
-            layoutLeftPanel (left);
-            layoutMainPanel (b);
+            auto bounds = getLocalBounds().reduced (12);
+            const int leftWidth = juce::jlimit (310, 350, (int) (bounds.getWidth() * 0.32f));
+            auto modulationArea = bounds.removeFromLeft (leftWidth);
+            bounds.removeFromLeft (14);
+            layoutModulationPanel (modulationArea);
+            layoutMainPanel (bounds);
         }
 
     private:
-        void layoutLeftPanel (juce::Rectangle<int> left)
+        void addComponents (std::initializer_list<juce::Component*> components)
         {
-            auto top = left.removeFromTop (76);
-            modDepthKnob->setBounds (top.removeFromRight (70));
-            top.removeFromRight (8);
-            modSourceCombo->setBounds (top.removeFromTop (48));
-            left.removeFromTop (8);
-
-            auto ctx = left;
-            int rowH = 46;
-            auto row = [&ctx, rowH]() { return ctx.removeFromTop (rowH); };
-
-            // LFO
-            {
-                auto r1 = row(); lfoShape->setBounds (r1.removeFromLeft (r1.getWidth() / 2)); lfoSynced->setBounds (r1);
-                auto r2 = row(); lfoRate->setBounds (r2.removeFromLeft (r2.getWidth() / 2)); lfoDiv->setBounds (r2);
-            }
-            // Env
-            {
-                auto r1 = row(); envAttack->setBounds (r1.removeFromLeft (r1.getWidth() / 2)); envRelease->setBounds (r1);
-            }
-            // Motion
-            {
-                auto r1 = row(); motionShape->setBounds (r1.removeFromLeft (r1.getWidth() / 2)); motionMode->setBounds (r1);
-                auto r2 = row(); motionSynced->setBounds (r2.removeFromLeft (r2.getWidth() / 3));
-                motionRate->setBounds (r2.removeFromLeft (r2.getWidth() / 2)); motionDiv->setBounds (r2);
-                auto r3 = row(); motionSmooth->setBounds (r3.removeFromLeft (r3.getWidth() / 2));
-            }
-            // Sequencer
-            {
-                auto r1 = row(); seqSteps->setBounds (r1.removeFromLeft (r1.getWidth() / 2)); seqSynced->setBounds (r1);
-                auto r2 = row(); seqRate->setBounds (r2.removeFromLeft (r2.getWidth() / 2)); seqDiv->setBounds (r2);
-                auto r3 = row(); seqSmooth->setBounds (r3.removeFromLeft (r3.getWidth() / 2));
-                ctx.removeFromTop (4);
-                seqGrid->setBounds (ctx.removeFromTop (70));
-            }
+            for (auto* component : components)
+                addAndMakeVisible (component);
         }
 
-        void layoutMainPanel (juce::Rectangle<int> b)
+        static void setPair (juce::Component& leftComponent, juce::Component& rightComponent,
+                             juce::Rectangle<int> row, int gap = 8)
         {
-            auto top = b.removeFromTop (34);
-            enableToggle->setBounds (top.removeFromLeft (50));
+            const int leftWidth = (row.getWidth() - gap) / 2;
+            leftComponent.setBounds (row.removeFromLeft (leftWidth));
+            row.removeFromLeft (gap);
+            rightComponent.setBounds (row);
+        }
+
+        void layoutModulationPanel (juce::Rectangle<int> area)
+        {
+            auto sourceRow = area.removeFromTop (118);
+            auto depthArea = sourceRow.removeFromRight (112);
+            modDepthKnob->setBounds (depthArea);
+            sourceRow.removeFromRight (10);
+            modSourceCombo->setBounds (sourceRow.removeFromTop (58));
+            area.removeFromTop (8);
+
+            layoutLfo (area);
+            layoutEnvelopeFollower (area);
+            layoutMotion (area);
+            layoutSequencer (area);
+        }
+
+        void layoutLfo (juce::Rectangle<int> area)
+        {
+            auto top = area.removeFromTop (58);
+            setPair (*lfoShape, *lfoSynced, top);
+            area.removeFromTop (12);
+
+            auto timing = area.removeFromTop (118);
+            lfoRate->setBounds (timing.removeFromLeft (118));
+            timing.removeFromLeft (10);
+            const auto selector = timing.removeFromTop (58);
+            lfoRateUnit->setBounds (selector);
+            lfoDiv->setBounds (selector);
+        }
+
+        void layoutEnvelopeFollower (juce::Rectangle<int> area)
+        {
+            auto row = area.removeFromTop (132);
+            const int knobWidth = juce::jmin (132, (row.getWidth() - 12) / 2);
+            const int total = knobWidth * 2 + 12;
+            row = row.withTrimmedLeft (juce::jmax (0, (row.getWidth() - total) / 2));
+            envAttack->setBounds (row.removeFromLeft (knobWidth));
+            row.removeFromLeft (12);
+            envRelease->setBounds (row.removeFromLeft (knobWidth));
+        }
+
+        void layoutMotion (juce::Rectangle<int> area)
+        {
+            auto top = area.removeFromTop (58);
+            setPair (*motionShape, *motionMode, top);
+            area.removeFromTop (10);
+
+            auto timingTop = area.removeFromTop (58);
+            motionSynced->setBounds (timingTop.removeFromLeft (128));
+            timingTop.removeFromLeft (10);
+            motionRateUnit->setBounds (timingTop);
+            motionDiv->setBounds (timingTop);
+            area.removeFromTop (8);
+
+            auto knobRow = area.removeFromTop (126);
+            const int knobWidth = 122;
+            const int total = knobWidth * 2 + 18;
+            knobRow = knobRow.withTrimmedLeft (juce::jmax (0, (knobRow.getWidth() - total) / 2));
+            motionRate->setBounds (knobRow.removeFromLeft (knobWidth));
+            knobRow.removeFromLeft (18);
+            motionSmooth->setBounds (knobRow.removeFromLeft (knobWidth));
+        }
+
+        void layoutSequencer (juce::Rectangle<int> area)
+        {
+            auto top = area.removeFromTop (72);
+            seqSteps->setBounds (top.removeFromLeft (190));
             top.removeFromLeft (10);
-            modeCombo->setBounds (top.removeFromLeft (160));
+            seqSynced->setBounds (top.removeFromTop (52));
+            area.removeFromTop (8);
 
-            b.removeFromTop (10);
-            visualizer->setBounds (b.removeFromTop (juce::jmax (90, (int) (b.getHeight() * 0.42f))));
-            b.removeFromTop (14);
+            auto timing = area.removeFromTop (116);
+            seqRate->setBounds (timing.removeFromLeft (116));
+            timing.removeFromLeft (10);
+            const auto selector = timing.removeFromTop (58);
+            seqRateUnit->setBounds (selector);
+            seqDiv->setBounds (selector);
+            area.removeFromTop (6);
 
-            auto knobRow = b.removeFromTop (110);
-            int n = 1 + (int) secondaryKnobs.size();
-            int w = knobRow.getWidth() / juce::jmax (1, n);
-            primaryKnob->setBounds (knobRow.removeFromLeft (w));
-            for (auto& k : secondaryKnobs)
-                k->setBounds (knobRow.removeFromLeft (w));
+            auto bottom = area;
+            seqSmooth->setBounds (bottom.removeFromLeft (112).removeFromTop (112));
+            bottom.removeFromLeft (10);
+            seqGrid->setBounds (bottom.removeFromTop (96));
         }
 
-        void timerCallback() override { refreshModContextVisibility(); }
+        void layoutMainPanel (juce::Rectangle<int> area)
+        {
+            auto top = area.removeFromTop (60);
+            enableToggle->setBounds (top.removeFromLeft (68).reduced (0, 7));
+            top.removeFromLeft (12);
+            modeCombo->setBounds (top.removeFromLeft (240));
+
+            area.removeFromTop (10);
+            visualizer->setBounds (area.removeFromTop (juce::jlimit (190, 235, (int) (area.getHeight() * 0.48f))));
+            area.removeFromTop (12);
+
+            std::vector<LabeledKnob*> knobs;
+            knobs.push_back (primaryKnob.get());
+            for (auto& knob : secondaryKnobs)
+                knobs.push_back (knob.get());
+
+            constexpr int knobWidth = 126;
+            constexpr int knobHeight = 138;
+            constexpr int gap = 16;
+            const int count = (int) knobs.size();
+            const int totalWidth = count * knobWidth + juce::jmax (0, count - 1) * gap;
+            int x = area.getX() + juce::jmax (0, (area.getWidth() - totalWidth) / 2);
+            const int y = area.getY() + juce::jmax (0, (area.getHeight() - knobHeight) / 2);
+
+            for (auto* knob : knobs)
+            {
+                knob->setBounds (x, y, knobWidth, knobHeight);
+                x += knobWidth + gap;
+            }
+        }
+
+        bool getBool (const juce::String& suffix) const
+        {
+            if (auto* value = apvts.getRawParameterValue (theSpec.prefix + "_" + suffix))
+                return value->load() > 0.5f;
+            return false;
+        }
+
+        void timerCallback() override
+        {
+            refreshModContextVisibility();
+        }
 
         void refreshModContextVisibility()
         {
-            int src = modSourceCombo->combo.getSelectedItemIndex();
-            bool isLfo = src == 1, isEnv = src == 2, isMotion = src == 3, isSeq = src == 4;
-            bool active = src != 0;
+            const int source = modSourceCombo->combo.getSelectedItemIndex();
+            const bool isLfo = source == 1;
+            const bool isEnv = source == 2;
+            const bool isMotion = source == 3;
+            const bool isSeq = source == 4;
 
-            for (auto* c2 : { (juce::Component*) lfoShape.get(), (juce::Component*) lfoSynced.get(),
-                              (juce::Component*) lfoRate.get(), (juce::Component*) lfoDiv.get() }) c2->setVisible (isLfo);
-            envAttack->setVisible (isEnv); envRelease->setVisible (isEnv);
-            for (auto* c2 : { (juce::Component*) motionShape.get(), (juce::Component*) motionMode.get(), (juce::Component*) motionSynced.get(),
-                              (juce::Component*) motionRate.get(), (juce::Component*) motionDiv.get(), (juce::Component*) motionSmooth.get() }) c2->setVisible (isMotion);
-            for (auto* c2 : { (juce::Component*) seqSteps.get(), (juce::Component*) seqSynced.get(),
-                              (juce::Component*) seqRate.get(), (juce::Component*) seqDiv.get(), (juce::Component*) seqSmooth.get() }) c2->setVisible (isSeq);
+            const bool lfoTempo = getBool ("lfo_synced");
+            const bool motionTempo = getBool ("motion_synced");
+            const bool seqTempo = getBool ("seq_synced");
+
+            lfoShape->setVisible (isLfo);
+            lfoSynced->setVisible (isLfo);
+            lfoRate->setVisible (isLfo && ! lfoTempo);
+            lfoRateUnit->setVisible (isLfo && ! lfoTempo);
+            lfoDiv->setVisible (isLfo && lfoTempo);
+
+            envAttack->setVisible (isEnv);
+            envRelease->setVisible (isEnv);
+
+            motionShape->setVisible (isMotion);
+            motionMode->setVisible (isMotion);
+            motionSynced->setVisible (isMotion);
+            motionRate->setVisible (isMotion && ! motionTempo);
+            motionRateUnit->setVisible (isMotion && ! motionTempo);
+            motionDiv->setVisible (isMotion && motionTempo);
+            motionSmooth->setVisible (isMotion);
+
+            seqSteps->setVisible (isSeq);
+            seqSynced->setVisible (isSeq);
+            seqRate->setVisible (isSeq && ! seqTempo);
+            seqRateUnit->setVisible (isSeq && ! seqTempo);
+            seqDiv->setVisible (isSeq && seqTempo);
+            seqSmooth->setVisible (isSeq);
             seqGrid->setVisible (isSeq);
-            if (isSeq) seqGrid->setNumSteps ((int) apvts.getRawParameterValue (theSpec.prefix + "_seq_numsteps")->load());
+            if (isSeq)
+                seqGrid->setNumSteps ((int) apvts.getRawParameterValue (theSpec.prefix + "_seq_numsteps")->load());
 
-            visualizer->setActive (active);
+            visualizer->setActive (source != 0);
         }
 
         juce::AudioProcessorValueTreeState& apvts;
@@ -186,19 +287,19 @@ namespace mfx
         std::unique_ptr<LabeledCombo> modSourceCombo;
         std::unique_ptr<LabeledKnob> modDepthKnob;
 
-        std::unique_ptr<LabeledCombo> lfoShape, lfoDiv;
+        std::unique_ptr<LabeledCombo> lfoShape, lfoRateUnit, lfoDiv;
         std::unique_ptr<LabeledToggle> lfoSynced;
         std::unique_ptr<LabeledKnob> lfoRate;
 
         std::unique_ptr<LabeledKnob> envAttack, envRelease;
 
-        std::unique_ptr<LabeledCombo> motionShape, motionMode, motionDiv;
+        std::unique_ptr<LabeledCombo> motionShape, motionMode, motionRateUnit, motionDiv;
         std::unique_ptr<LabeledToggle> motionSynced;
         std::unique_ptr<LabeledKnob> motionRate, motionSmooth;
 
         std::unique_ptr<LabeledKnob> seqSteps, seqRate, seqSmooth;
         std::unique_ptr<LabeledToggle> seqSynced;
-        std::unique_ptr<LabeledCombo> seqDiv;
+        std::unique_ptr<LabeledCombo> seqRateUnit, seqDiv;
         std::unique_ptr<StepBarGrid> seqGrid;
     };
 }

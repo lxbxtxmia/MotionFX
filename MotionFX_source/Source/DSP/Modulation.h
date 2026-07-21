@@ -15,8 +15,12 @@ namespace mfx
     // Note divisions used by every tempo-synced source (LFO / sequencer / motion).
     enum class SyncDiv
     {
-        d4Bar, d2Bar, d1Bar, d1_2, d1_4, d1_8, d1_8T, d1_16, d1_16T, d1_32
+        // Keep the first ten values stable for preset/session compatibility.
+        d4Bar, d2Bar, d1Bar, d1_2, d1_4, d1_8, d1_8T, d1_16, d1_16T, d1_32,
+        d1_2D, d1_2T, d1_4D, d1_4T, d1_8D, d1_16D, d1_32D, d1_32T
     };
+
+    static constexpr int syncDivCount = 18;
 
     inline double syncDivToBeats (SyncDiv d) noexcept
     {
@@ -32,6 +36,14 @@ namespace mfx
             case SyncDiv::d1_16:  return 0.25;
             case SyncDiv::d1_16T: return 0.25 * (2.0 / 3.0);
             case SyncDiv::d1_32:  return 0.125;
+            case SyncDiv::d1_2D:  return 3.0;
+            case SyncDiv::d1_2T:  return 4.0 / 3.0;
+            case SyncDiv::d1_4D:  return 1.5;
+            case SyncDiv::d1_4T:  return 2.0 / 3.0;
+            case SyncDiv::d1_8D:  return 0.75;
+            case SyncDiv::d1_16D: return 0.375;
+            case SyncDiv::d1_32D: return 0.1875;
+            case SyncDiv::d1_32T: return 1.0 / 12.0;
         }
         return 1.0;
     }
@@ -50,6 +62,14 @@ namespace mfx
             case SyncDiv::d1_16:  return "1/16";
             case SyncDiv::d1_16T: return "1/16T";
             case SyncDiv::d1_32:  return "1/32";
+            case SyncDiv::d1_2D:  return "1/2 D";
+            case SyncDiv::d1_2T:  return "1/2 T";
+            case SyncDiv::d1_4D:  return "1/4 D";
+            case SyncDiv::d1_4T:  return "1/4 T";
+            case SyncDiv::d1_8D:  return "1/8 D";
+            case SyncDiv::d1_16D: return "1/16 D";
+            case SyncDiv::d1_32D: return "1/32 D";
+            case SyncDiv::d1_32T: return "1/32 T";
         }
         return "1/4";
     }

@@ -5,10 +5,38 @@ using namespace mfx;
 
 namespace
 {
-    class ScrollableTextDialogContent final : public juce::Component
+    class AboutDialogContent final : public juce::Component
     {
     public:
-        explicit ScrollableTextDialogContent (const juce::String& text)
+        AboutDialogContent (const juce::String& aboutText, const juce::String& changelogText, bool startExpanded)
+        {
+            configureEditor (aboutEditor, aboutText);
+            configureEditor (changelogEditor, changelogText);
+            addAndMakeVisible (aboutEditor);
+            addAndMakeVisible (changelogToggle);
+            addAndMakeVisible (changelogEditor);
+
+            changelogToggle.onClick = [this]
+            {
+                setExpanded (! expanded);
+            };
+
+            setExpanded (startExpanded);
+        }
+
+        void resized() override
+        {
+            auto bounds = getLocalBounds().reduced (12);
+            aboutEditor.setBounds (bounds.removeFromTop (245));
+            bounds.removeFromTop (8);
+            changelogToggle.setBounds (bounds.removeFromTop (36));
+            bounds.removeFromTop (8);
+            if (expanded)
+                changelogEditor.setBounds (bounds);
+        }
+
+    private:
+        static void configureEditor (juce::TextEditor& editor, const juce::String& text)
         {
             editor.setMultiLine (true);
             editor.setReadOnly (true);
@@ -17,17 +45,23 @@ namespace
             editor.setColour (juce::TextEditor::backgroundColourId, Palette::bg1);
             editor.setColour (juce::TextEditor::textColourId, Palette::text);
             editor.setColour (juce::TextEditor::outlineColourId, Palette::stroke);
-            addAndMakeVisible (editor);
-            setSize (620, 440);
         }
 
-        void resized() override
+        void setExpanded (bool shouldExpand)
         {
-            editor.setBounds (getLocalBounds().reduced (12));
+            expanded = shouldExpand;
+            changelogEditor.setVisible (expanded);
+            changelogToggle.setButtonText (expanded ? "Hide changelog" : "Show changelog");
+            setSize (660, expanded ? 600 : 330);
+            resized();
+
+            if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>())
+                dialog->setContentComponentSize (getWidth(), getHeight());
         }
 
-    private:
-        juce::TextEditor editor;
+        juce::TextEditor aboutEditor, changelogEditor;
+        juce::TextButton changelogToggle;
+        bool expanded = false;
     };
 
     EffectPanelSpec makeSpec (EffectId id)
@@ -181,26 +215,26 @@ void MotionFXAudioProcessorEditor::resized()
 
     auto b = content.getLocalBounds().reduced (14);
 
-    auto header = b.removeFromTop (58);
-    titleLabel.setBounds (header.removeFromLeft (170));
+    auto header = b.removeFromTop (78);
+    titleLabel.setBounds (header.removeFromLeft (170).reduced (0, 10));
 
-    auto masterArea = header.removeFromRight (330);
-    matchGainToggle->setBounds (masterArea.removeFromRight (70).reduced (0, 14));
-    dryWetKnob->setBounds (masterArea.removeFromRight (86));
-    outputKnob->setBounds (masterArea.removeFromRight (86));
-    inputKnob->setBounds (masterArea.removeFromRight (86));
+    auto masterArea = header.removeFromRight (390);
+    matchGainToggle->setBounds (masterArea.removeFromRight (88).reduced (2, 19));
+    dryWetKnob->setBounds (masterArea.removeFromRight (98));
+    outputKnob->setBounds (masterArea.removeFromRight (98));
+    inputKnob->setBounds (masterArea.removeFromRight (98));
 
     auto presetBar = header;
-    optionsBtn.setBounds (presetBar.removeFromRight (36).reduced (2, 12));
-    presetBar.removeFromRight (4);
-    savePresetBtn.setBounds (presetBar.removeFromRight (56).reduced (0, 12));
-    presetBar.removeFromRight (4);
-    nextPresetBtn.setBounds (presetBar.removeFromRight (28).reduced (0, 12));
-    prevPresetBtn.setBounds (presetBar.removeFromLeft (28).reduced (0, 12));
-    presetNameButton.setBounds (presetBar.reduced (0, 12));
+    optionsBtn.setBounds (presetBar.removeFromRight (38).reduced (1, 20));
+    presetBar.removeFromRight (5);
+    savePresetBtn.setBounds (presetBar.removeFromRight (62).reduced (0, 20));
+    presetBar.removeFromRight (5);
+    nextPresetBtn.setBounds (presetBar.removeFromRight (32).reduced (0, 20));
+    prevPresetBtn.setBounds (presetBar.removeFromLeft (32).reduced (0, 20));
+    presetNameButton.setBounds (presetBar.reduced (0, 20));
 
-    b.removeFromTop (10);
-    tabStrip.setBounds (b.removeFromTop (40));
+    b.removeFromTop (8);
+    tabStrip.setBounds (b.removeFromTop (42));
     b.removeFromTop (10);
 
     auto order = processor.getOrder();
@@ -239,26 +273,14 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
         showAboutDialog();
 }
 
-void MotionFXAudioProcessorEditor::showScrollableTextDialog (const juce::String& title, const juce::String& text)
+void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new ScrollableTextDialogContent (text));
-    options.dialogTitle = title;
-    options.dialogBackgroundColour = Palette::bg0;
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = true;
-    options.launchAsync();
-}
-
-void MotionFXAudioProcessorEditor::showAboutDialog()
-{
-    showScrollableTextDialog ("About MotionFX", R"MFXABOUT(MotionFX 0.3.0 — Build 3
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.4.0 - Build 4
 
 Multi-effect modulation VST3.
 
-Direction and development: lxbxtxmia
-Development assistance: Claude and ChatGPT
+Direction and development: Paom
+Some AI was used during the creation of this plugin, but all generated work was reviewed, reworked and proofed by humans.
 
 Built with JUCE 8, C++20, CMake and the VST3 format.
 
@@ -268,26 +290,49 @@ Resources
 - GitHub Actions continuous integration
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
+
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.4.0 - Build 4
+- Reworked the interface hierarchy and control sizing.
+- Unified effect and modulation knob sizes.
+- Added two-decimal numeric displays and direct value entry.
+- Added Hz, seconds and tempo-synced timing for LFO, Motion and Sequencer modulators.
+- Added dotted and additional triplet timing divisions while preserving old preset indices.
+- Enlarged mode selectors and reorganised related modulation controls.
+- Corrected Stutter repeat lengths so 1/4, 1/8, 1/16 and 1/32 are absolute musical values.
+- Added Stutter loop-boundary crossfades, Clear and alternating 1/8 helpers.
+- Consolidated About and Changelog into one expandable window.
+- Registered the audio and GUI executables with CTest.
+
+0.3.0 - Build 3
+- Preset identity and modified-state persistence.
+- Clean Init state.
+- Header, preset and modulation-source readability fixes.
+- Stable drag-and-drop tab identity.
+- Direct numeric value entry and compact decimals.
+- About, resources and changelog windows.
+
+0.2.0 - Build 2
+- Preset browser and recursive user folders.
+- Portable CMake and automated Windows/Linux builds.
+
+0.1.0 - Build 1
+- DSP pause on stopped host transport.
+- Selected-effect identity preserved during reorder.
+- Gain Match naming update.)MFXCHANGELOG");
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (new AboutDialogContent (aboutText, changelogText, openChangelog));
+    options.dialogTitle = "About MotionFX";
+    options.dialogBackgroundColour = Palette::bg0;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.launchAsync();
 }
 
 void MotionFXAudioProcessorEditor::showChangelogDialog()
 {
-    showScrollableTextDialog ("MotionFX Changelog", R"MFXCHANGELOG(0.3.0 - Block 3
-- Preset identity and modified-state persistence
-- Clean Init state
-- Header and modulation-source readability fixes
-- Stable drag-and-drop tab identity
-- Direct numeric value entry and compact decimals
-- About, resources and changelog windows
-
-Block 2
-- Preset browser and recursive user folders
-- Portable CMake and automated builds
-
-Block 1
-- DSP pause on stopped host transport
-- Selected-effect identity preserved during reorder
-- Gain Match naming update)MFXCHANGELOG");
+    showAboutDialog (true);
 }
 
 void MotionFXAudioProcessorEditor::showPresetMenu()
@@ -406,8 +451,8 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     menu.addItem (2, "Reset Preset Folder to Default");
     menu.addItem (6, "Open Preset Folder");
     menu.addSeparator();
-    menu.addItem (7, "About MotionFX...");
-    menu.addItem (8, "Changelog...");
+    menu.addItem (7, "About / Changelog...");
+    menu.addItem (8, "Open Changelog...");
 
     menu.showMenuAsync (juce::PopupMenu::Options(), [this] (int result)
     {

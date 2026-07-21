@@ -18,204 +18,282 @@ namespace mfx
         void prepare (double sr) noexcept
         {
             sampleRate = sr;
-            const int cap = (int) (2.0 * sr);
-            for (auto& b : circBuf) b.assign ((size_t) cap, 0.0f);
-            for (auto& s : snippetBuf) s.assign ((size_t) cap, 0.0f);
+            const int cap = (int) (8.0 * sr);
+            for (auto& buffer : circBuf) buffer.assign ((size_t) cap, 0.0f);
+            for (auto& buffer : snippetBuf) buffer.assign ((size_t) cap, 0.0f);
             capacity = cap;
             reset();
         }
 
         void reset() noexcept
         {
-            writePos = 0; lastStepIndex = -1; sampleCounterInStep = 0;
-            playPos = 0.0; rate = 1.0; loopSnippetLen = 1; loopCounter = 0;
+            writePos = 0;
+            validHistorySamples = 0;
+            lastStepIndex = -1;
+            sampleCounterInStep = 0;
+            playPos = 0.0;
+            rate = 1.0;
+            loopSnippetLen = 1;
+            loopCounter = 0;
             currentAction = StepAction::Off;
-            for (auto& b : circBuf) std::fill (b.begin(), b.end(), 0.0f);
+            for (auto& buffer : circBuf)
+                std::fill (buffer.begin(), buffer.end(), 0.0f);
         }
 
-        void setEnabled (bool e) noexcept { enabled = e; }
+        void setEnabled (bool shouldBeEnabled) noexcept { enabled = shouldBeEnabled; }
         void setPattern (int n, SyncDiv d) noexcept { numSteps = juce::jlimit (1, maxSteps, n); division = d; }
-        void setStepAction (int i, StepAction a) noexcept { if (i >= 0 && i < maxSteps) pattern[(size_t) i] = a; }
+        void setStepAction (int i, StepAction action) noexcept { if (i >= 0 && i < maxSteps) pattern[(size_t) i] = action; }
         StepAction getStepAction (int i) const noexcept { return (i >= 0 && i < maxSteps) ? pattern[(size_t) i] : StepAction::Off; }
-        void setMix (float m) noexcept { mix = juce::jlimit (0.0f, 1.0f, m); }
+        void setMix (float newMix) noexcept { mix = juce::jlimit (0.0f, 1.0f, newMix); }
 
-        void processBlock (juce::AudioBuffer<float>& buf, const TransportInfo& t) noexcept
+        void processBlock (juce::AudioBuffer<float>& buffer, const TransportInfo& transport) noexcept
         {
-            if (! enabled || buf.getNumChannels() < 2) return;
+            if (! enabled || buffer.getNumChannels() < 2)
+                return;
 
             const double beatsPerStep = syncDivToBeats (division);
-            const double secPerBeat = 60.0 / juce::jmax (1.0, t.bpm);
-            const double stepLenSamplesD = beatsPerStep * secPerBeat * sampleRate;
-            const int stepLenSamples = juce::jmax (4, (int) stepLenSamplesD);
-            const int fadeLen = juce::jmin (stepLenSamples / 4, (int) (0.003 * sampleRate) + 1);
+            const double secondsPerBeat = 60.0 / juce::jmax (1.0, transport.bpm);
+            const double stepLengthSamplesExact = beatsPerStep * secondsPerBeat * sampleRate;
+            const int stepLengthSamples = juce::jmax (4, (int) std::round (stepLengthSamplesExact));
+            const int actionFadeLength = juce::jmin (stepLengthSamples / 4, (int) (0.003 * sampleRate) + 1);
 
-            double stepPhaseCont = t.ppqPosition / beatsPerStep;
-            stepPhaseCont = std::fmod (stepPhaseCont, (double) numSteps);
-            if (stepPhaseCont < 0.0) stepPhaseCont += numSteps;
+            double continuousStepPosition = transport.ppqPosition / beatsPerStep;
+            continuousStepPosition = std::fmod (continuousStepPosition, (double) numSteps);
+            if (continuousStepPosition < 0.0)
+                continuousStepPosition += numSteps;
 
-            auto* L = buf.getWritePointer (0);
-            auto* R = buf.getWritePointer (1);
-            const int n = buf.getNumSamples();
+            auto* left = buffer.getWritePointer (0);
+            auto* right = buffer.getWritePointer (1);
+            const int numSamples = buffer.getNumSamples();
 
-            for (int i = 0; i < n; ++i)
+            for (int sample = 0; sample < numSamples; ++sample)
             {
-                // advance the continuous step-phase sample-by-sample so step
-                // boundaries land precisely regardless of block size.
-                double instantaneousStepPos = stepPhaseCont + (double) i * (1.0 / stepLenSamplesD);
-                int stepIndex = (int) std::floor (instantaneousStepPos) % numSteps;
-                if (stepIndex < 0) stepIndex += numSteps;
+                const double instantaneousPosition = continuousStepPosition
+                    + (double) sample * (1.0 / stepLengthSamplesExact);
+                int stepIndex = (int) std::floor (instantaneousPosition) % numSteps;
+                if (stepIndex < 0)
+                    stepIndex += numSteps;
 
                 if (stepIndex != lastStepIndex)
                 {
                     lastStepIndex = stepIndex;
                     sampleCounterInStep = 0;
                     currentAction = pattern[(size_t) stepIndex];
-                    beginStep (currentAction, stepLenSamples);
+                    beginStep (currentAction, stepLengthSamples, transport.bpm);
                 }
 
-                float liveL = L[i], liveR = R[i];
-                circBuf[0][(size_t) writePos] = liveL;
-                circBuf[1][(size_t) writePos] = liveR;
+                const float liveLeft = left[sample];
+                const float liveRight = right[sample];
+                circBuf[0][(size_t) writePos] = liveLeft;
+                circBuf[1][(size_t) writePos] = liveRight;
 
-                float procL = liveL, procR = liveR;
-                bool isOff = (currentAction == StepAction::Off);
+                float processedLeft = liveLeft;
+                float processedRight = liveRight;
+                const bool actionIsOff = currentAction == StepAction::Off;
 
-                if (! isOff)
-                    computeSample (procL, procR, liveL, liveR);
+                if (! actionIsOff)
+                    computeSample (processedLeft, processedRight);
 
-                float fadeGain = 1.0f;
-                if (! isOff)
+                float actionFade = 1.0f;
+                if (! actionIsOff)
                 {
-                    if (sampleCounterInStep < fadeLen)
-                        fadeGain = (float) sampleCounterInStep / (float) fadeLen;
-                    else if (sampleCounterInStep > stepLenSamples - fadeLen)
-                        fadeGain = juce::jmax (0.0f, (float) (stepLenSamples - sampleCounterInStep) / (float) fadeLen);
+                    if (sampleCounterInStep < actionFadeLength)
+                        actionFade = (float) sampleCounterInStep / (float) juce::jmax (1, actionFadeLength);
+                    else if (sampleCounterInStep > stepLengthSamples - actionFadeLength)
+                        actionFade = juce::jmax (0.0f,
+                            (float) (stepLengthSamples - sampleCounterInStep) / (float) juce::jmax (1, actionFadeLength));
                 }
 
-                float outL = isOff ? liveL : (liveL * (1.0f - fadeGain) + procL * fadeGain);
-                float outR = isOff ? liveR : (liveR * (1.0f - fadeGain) + procR * fadeGain);
-
-                L[i] = flushDenorm (liveL * (1.0f - mix) + outL * mix);
-                R[i] = flushDenorm (liveR * (1.0f - mix) + outR * mix);
+                const float effectedLeft = actionIsOff ? liveLeft : juce::jmap (actionFade, liveLeft, processedLeft);
+                const float effectedRight = actionIsOff ? liveRight : juce::jmap (actionFade, liveRight, processedRight);
+                left[sample] = flushDenorm (juce::jmap (mix, liveLeft, effectedLeft));
+                right[sample] = flushDenorm (juce::jmap (mix, liveRight, effectedRight));
 
                 writePos = (writePos + 1) % capacity;
+                validHistorySamples = juce::jmin (capacity, validHistorySamples + 1);
                 ++sampleCounterInStep;
             }
         }
 
-        // exposed for the UI to draw + edit
         int getNumSteps() const noexcept { return numSteps; }
         SyncDiv getDivision() const noexcept { return division; }
         int getCurrentStepIndex() const noexcept { return lastStepIndex; }
+        int getCurrentLoopLengthSamples() const noexcept { return loopSnippetLen; }
+        int getNominalRepeatLengthSamples (StepAction action, double bpm) const noexcept
+        {
+            return repeatLengthSamples (action, bpm);
+        }
 
     private:
-        void beginStep (StepAction action, int stepLenSamples) noexcept
+        int repeatLengthSamples (StepAction action, double bpm) const noexcept
+        {
+            double beats = 1.0;
+            switch (action)
+            {
+                case StepAction::Repeat4:  beats = 1.0; break;
+                case StepAction::Repeat8:  beats = 0.5; break;
+                case StepAction::Repeat16: beats = 0.25; break;
+                case StepAction::Repeat32: beats = 0.125; break;
+                default: break;
+            }
+
+            const double seconds = beats * 60.0 / juce::jmax (1.0, bpm);
+            return juce::jlimit (2, juce::jmax (2, capacity - 4), (int) std::round (seconds * sampleRate));
+        }
+
+        void beginStep (StepAction action, int stepLengthSamples, double bpm) noexcept
         {
             switch (action)
             {
-                case StepAction::Repeat4:  loopSnippetLen = juce::jlimit (2, capacity - 4, stepLenSamples / 4); captureSnippet (loopSnippetLen, false); loopCounter = 0; break;
-                case StepAction::Repeat8:  loopSnippetLen = juce::jlimit (2, capacity - 4, stepLenSamples / 8); captureSnippet (loopSnippetLen, false); loopCounter = 0; break;
-                case StepAction::Repeat16: loopSnippetLen = juce::jlimit (2, capacity - 4, stepLenSamples / 16); captureSnippet (loopSnippetLen, false); loopCounter = 0; break;
-                case StepAction::Repeat32: loopSnippetLen = juce::jlimit (2, capacity - 4, stepLenSamples / 32); captureSnippet (loopSnippetLen, false); loopCounter = 0; break;
-                case StepAction::Reverse:  loopSnippetLen = juce::jlimit (2, capacity - 4, stepLenSamples); captureSnippet (loopSnippetLen, true); loopCounter = 0; break;
-                case StepAction::TapeStopDown: playPos = (double) writePos; rate = 1.0; break;
-                case StepAction::TapeStopUp:   playPos = (double) writePos - 8.0; rate = 0.0; break;
-                case StepAction::PitchUp:      playPos = (double) writePos; rate = 1.6; loopSnippetLen = juce::jmax (4, stepLenSamples); break;
-                case StepAction::PitchDown:    playPos = (double) writePos; rate = 0.6; break;
+                case StepAction::Repeat4:
+                case StepAction::Repeat8:
+                case StepAction::Repeat16:
+                case StepAction::Repeat32:
+                    loopSnippetLen = repeatLengthSamples (action, bpm);
+                    captureSnippet (loopSnippetLen, false);
+                    loopCounter = 0;
+                    break;
+                case StepAction::Reverse:
+                    loopSnippetLen = juce::jlimit (2, capacity - 4, stepLengthSamples);
+                    captureSnippet (loopSnippetLen, true);
+                    loopCounter = 0;
+                    break;
+                case StepAction::TapeStopDown:
+                    playPos = (double) writePos;
+                    rate = 1.0;
+                    break;
+                case StepAction::TapeStopUp:
+                    playPos = (double) writePos - 8.0;
+                    rate = 0.0;
+                    break;
+                case StepAction::PitchUp:
+                    playPos = (double) writePos;
+                    rate = 1.6;
+                    loopSnippetLen = juce::jmax (4, stepLengthSamples);
+                    break;
+                case StepAction::PitchDown:
+                    playPos = (double) writePos;
+                    rate = 0.6;
+                    break;
                 case StepAction::Off:
-                case StepAction::Gate: default: break;
+                case StepAction::Gate:
+                default:
+                    break;
             }
-            currentStepLenSamples = stepLenSamples;
+            currentStepLengthSamples = stepLengthSamples;
         }
 
-        void captureSnippet (int len, bool reversed) noexcept
+        void captureSnippet (int requestedLength, bool reversed) noexcept
         {
-            // writePos is the slot about to be written this sample, so the most
-            // recently completed sample sits one behind it.
-            int mostRecent = (writePos - 1 + capacity) % capacity;
-            for (int ch = 0; ch < 2; ++ch)
+            const int available = juce::jmax (2, juce::jmin (validHistorySamples, capacity - 4));
+            loopSnippetLen = juce::jlimit (2, available, requestedLength);
+            const int mostRecent = (writePos - 1 + capacity) % capacity;
+
+            for (int channel = 0; channel < 2; ++channel)
             {
-                for (int k = 0; k < len; ++k)
+                for (int sample = 0; sample < loopSnippetLen; ++sample)
                 {
-                    int srcIdx = reversed ? (mostRecent - k + capacity) % capacity
-                                           : (mostRecent - len + 1 + k + capacity) % capacity;
-                    snippetBuf[(size_t) ch][(size_t) k] = circBuf[(size_t) ch][(size_t) srcIdx];
+                    const int sourceIndex = reversed
+                        ? (mostRecent - sample + capacity) % capacity
+                        : (mostRecent - loopSnippetLen + 1 + sample + capacity) % capacity;
+                    snippetBuf[(size_t) channel][(size_t) sample] = circBuf[(size_t) channel][(size_t) sourceIndex];
                 }
             }
         }
 
-        float interpRead (int ch, double pos) const noexcept
+        float readLoopSample (int channel, int counter) const noexcept
         {
-            pos = std::fmod (pos, (double) capacity);
-            while (pos < 0.0) pos += capacity;
-            int i0 = (int) pos;
-            int i1 = (i0 + 1) % capacity;
-            float frac = (float) (pos - std::floor (pos));
-            const auto& b = circBuf[(size_t) ch];
-            return b[(size_t) i0] + frac * (b[(size_t) i1] - b[(size_t) i0]);
+            const int index = counter % loopSnippetLen;
+            const int crossfadeLength = juce::jmin (loopSnippetLen / 4, juce::jmax (1, (int) (0.002 * sampleRate)));
+            if (index >= crossfadeLength || crossfadeLength <= 1)
+                return snippetBuf[(size_t) channel][(size_t) index];
+
+            const int previousIndex = loopSnippetLen - crossfadeLength + index;
+            const float alpha = (float) index / (float) crossfadeLength;
+            return juce::jmap (alpha,
+                snippetBuf[(size_t) channel][(size_t) previousIndex],
+                snippetBuf[(size_t) channel][(size_t) index]);
         }
 
-        void computeSample (float& procL, float& procR, float liveL, float liveR) noexcept
+        float interpolatedCircularRead (int channel, double position) const noexcept
         {
-            juce::ignoreUnused (liveL, liveR);
+            position = std::fmod (position, (double) capacity);
+            while (position < 0.0)
+                position += capacity;
+            const int first = (int) position;
+            const int second = (first + 1) % capacity;
+            const float fraction = (float) (position - std::floor (position));
+            const auto& data = circBuf[(size_t) channel];
+            return data[(size_t) first] + fraction * (data[(size_t) second] - data[(size_t) first]);
+        }
+
+        void computeSample (float& processedLeft, float& processedRight) noexcept
+        {
             switch (currentAction)
             {
-                case StepAction::Repeat4: case StepAction::Repeat8:
-                case StepAction::Repeat16: case StepAction::Repeat32:
-                {
-                    int idx = loopCounter % loopSnippetLen;
-                    procL = snippetBuf[0][(size_t) idx];
-                    procR = snippetBuf[1][(size_t) idx];
+                case StepAction::Repeat4:
+                case StepAction::Repeat8:
+                case StepAction::Repeat16:
+                case StepAction::Repeat32:
+                    processedLeft = readLoopSample (0, loopCounter);
+                    processedRight = readLoopSample (1, loopCounter);
                     ++loopCounter;
                     break;
-                }
                 case StepAction::Reverse:
                 {
-                    int idx = juce::jmin (loopCounter, loopSnippetLen - 1);
-                    procL = snippetBuf[0][(size_t) idx];
-                    procR = snippetBuf[1][(size_t) idx];
+                    const int index = juce::jmin (loopCounter, loopSnippetLen - 1);
+                    processedLeft = snippetBuf[0][(size_t) index];
+                    processedRight = snippetBuf[1][(size_t) index];
                     ++loopCounter;
                     break;
                 }
                 case StepAction::TapeStopDown:
                 {
-                    float frac = juce::jlimit (0.0f, 1.0f, (float) sampleCounterInStep / (float) currentStepLenSamples);
-                    rate = juce::jmax (0.0, 1.0 - (double) frac);
+                    const float progress = juce::jlimit (0.0f, 1.0f,
+                        (float) sampleCounterInStep / (float) juce::jmax (1, currentStepLengthSamples));
+                    rate = juce::jmax (0.0, 1.0 - (double) progress);
                     playPos += rate;
-                    procL = interpRead (0, playPos); procR = interpRead (1, playPos);
+                    processedLeft = interpolatedCircularRead (0, playPos);
+                    processedRight = interpolatedCircularRead (1, playPos);
                     break;
                 }
                 case StepAction::TapeStopUp:
                 {
-                    float frac = juce::jlimit (0.0f, 1.0f, (float) sampleCounterInStep / (float) currentStepLenSamples);
-                    rate = (double) frac;
+                    const float progress = juce::jlimit (0.0f, 1.0f,
+                        (float) sampleCounterInStep / (float) juce::jmax (1, currentStepLengthSamples));
+                    rate = (double) progress;
                     playPos += rate;
-                    procL = interpRead (0, playPos); procR = interpRead (1, playPos);
+                    processedLeft = interpolatedCircularRead (0, playPos);
+                    processedRight = interpolatedCircularRead (1, playPos);
                     break;
                 }
                 case StepAction::PitchUp:
-                {
                     playPos += rate;
                     if ((double) writePos - playPos < 32.0)
                         playPos -= loopSnippetLen;
-                    procL = interpRead (0, playPos); procR = interpRead (1, playPos);
+                    processedLeft = interpolatedCircularRead (0, playPos);
+                    processedRight = interpolatedCircularRead (1, playPos);
                     break;
-                }
                 case StepAction::PitchDown:
-                {
                     playPos += rate;
-                    procL = interpRead (0, playPos); procR = interpRead (1, playPos);
+                    processedLeft = interpolatedCircularRead (0, playPos);
+                    processedRight = interpolatedCircularRead (1, playPos);
                     break;
-                }
-                case StepAction::Gate: procL = 0.0f; procR = 0.0f; break;
-                case StepAction::Off: default: break;
+                case StepAction::Gate:
+                    processedLeft = 0.0f;
+                    processedRight = 0.0f;
+                    break;
+                case StepAction::Off:
+                default:
+                    break;
             }
         }
 
         double sampleRate = 44100.0;
-        int capacity = 88200;
+        int capacity = 352800;
         std::array<std::vector<float>, 2> circBuf, snippetBuf;
         int writePos = 0;
+        int validHistorySamples = 0;
 
         bool enabled = false;
         int numSteps = 16;
@@ -225,10 +303,12 @@ namespace mfx
 
         int lastStepIndex = -1;
         int sampleCounterInStep = 0;
-        int currentStepLenSamples = 4410;
+        int currentStepLengthSamples = 4410;
         StepAction currentAction = StepAction::Off;
 
-        double playPos = 0.0, rate = 1.0;
-        int loopSnippetLen = 1, loopCounter = 0;
+        double playPos = 0.0;
+        double rate = 1.0;
+        int loopSnippetLen = 1;
+        int loopCounter = 0;
     };
 }

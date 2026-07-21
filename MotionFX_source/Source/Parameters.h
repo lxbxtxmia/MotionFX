@@ -7,9 +7,11 @@ namespace mfx
 {
     inline juce::StringArray syncDivChoices()
     {
-        return { "4 Bar", "2 Bar", "1 Bar", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+        return { "4 Bar", "2 Bar", "1 Bar", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32",
+                 "1/2 D", "1/2 T", "1/4 D", "1/4 T", "1/8 D", "1/16 D", "1/32 D", "1/32 T" };
     }
 
+    inline juce::StringArray rateUnitChoices() { return { "Hz", "Seconds" }; }
     inline juce::StringArray modSourceChoices() { return { "Off", "LFO", "Env Follower", "Motion", "Sequencer" }; }
     inline juce::StringArray lfoShapeChoices()  { return { "Sine", "Triangle", "Square", "Saw" }; }
     inline juce::StringArray motionModeChoices() { return { "Loop", "One-Shot", "Trigger" }; }
@@ -55,8 +57,10 @@ namespace mfx
         p.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID (pidFor (prefix, "lfo_synced"), 1), prefix + " LFO Synced", false));
         p.push_back (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID (pidFor (prefix, "lfo_rate"), 1), prefix + " LFO Rate Hz",
+            juce::ParameterID (pidFor (prefix, "lfo_rate"), 1), prefix + " LFO Rate",
             juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.35f), 1.0f));
+        p.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (pidFor (prefix, "lfo_rateunit"), 1), prefix + " LFO Rate Unit", rateUnitChoices(), 0));
         p.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID (pidFor (prefix, "lfo_div"), 1), prefix + " LFO Division", syncDivChoices(), 4));
 
@@ -68,8 +72,10 @@ namespace mfx
         p.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID (pidFor (prefix, "motion_synced"), 1), prefix + " Motion Synced", false));
         p.push_back (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID (pidFor (prefix, "motion_rate"), 1), prefix + " Motion Rate Hz",
+            juce::ParameterID (pidFor (prefix, "motion_rate"), 1), prefix + " Motion Rate",
             juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.35f), 0.5f));
+        p.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (pidFor (prefix, "motion_rateunit"), 1), prefix + " Motion Rate Unit", rateUnitChoices(), 0));
         p.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID (pidFor (prefix, "motion_div"), 1), prefix + " Motion Division", syncDivChoices(), 2));
         p.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -90,8 +96,10 @@ namespace mfx
         p.push_back (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID (pidFor (prefix, "seq_synced"), 1), prefix + " Seq Synced", false));
         p.push_back (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID (pidFor (prefix, "seq_rate"), 1), prefix + " Seq Rate Hz",
+            juce::ParameterID (pidFor (prefix, "seq_rate"), 1), prefix + " Seq Rate",
             juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.35f), 2.0f));
+        p.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (pidFor (prefix, "seq_rateunit"), 1), prefix + " Seq Rate Unit", rateUnitChoices(), 0));
         p.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID (pidFor (prefix, "seq_div"), 1), prefix + " Seq Division", syncDivChoices(), 5));
         p.push_back (std::make_unique<juce::AudioParameterFloat> (

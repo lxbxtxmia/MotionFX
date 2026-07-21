@@ -20,9 +20,8 @@ private:
     void setScalePercent (int percent);
     void showPresetMenu();
     void showOptionsMenu();
-    void showAboutDialog();
+    void showAboutDialog (bool openChangelog = false);
     void showChangelogDialog();
-    void showScrollableTextDialog (const juce::String& title, const juce::String& text);
     void refreshPresetLabel();
     void savePresetDialog();
     void createPresetFolderDialog();

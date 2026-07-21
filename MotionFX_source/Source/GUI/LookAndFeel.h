@@ -53,7 +53,7 @@ namespace mfx
                                 float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
                                 juce::Slider& slider) override
         {
-            auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (width * 0.08f);
+            auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (juce::jmin (width, height) * 0.08f);
             auto centre = bounds.getCentre();
             float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
             float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
@@ -160,6 +160,21 @@ namespace mfx
         juce::Font getLabelFont (juce::Label& l) override
         {
             return juce::Font (juce::FontOptions (juce::jmax (10.0f, l.getHeight() * 0.62f)));
+        }
+
+        juce::Font getComboBoxFont (juce::ComboBox& box) override
+        {
+            return juce::Font (juce::FontOptions (juce::jlimit (13.0f, 17.0f, box.getHeight() * 0.42f)));
+        }
+
+        juce::Font getPopupMenuFont() override
+        {
+            return juce::Font (juce::FontOptions (14.0f));
+        }
+
+        juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
+        {
+            return juce::Font (juce::FontOptions (juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)));
         }
 
         void drawTabButton (juce::TabBarButton&, juce::Graphics&, bool, bool) override {}
