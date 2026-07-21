@@ -146,25 +146,22 @@ namespace mfx
             g.fillPath (arrow);
         }
 
-        juce::Font getComboBoxFont (juce::ComboBox& box) override
+                juce::Font getLabelFont (juce::Label& label) override
         {
-            const auto size = juce::jlimit (12.0f, 16.0f, box.getHeight() * 0.45f);
-            return juce::Font (juce::FontOptions (size));
-        }
-
-        juce::Font getPopupMenuFont() override
-        {
-            return juce::Font (juce::FontOptions (14.0f));
-        }
-
-        juce::Font getLabelFont (juce::Label& l) override
-        {
-            return juce::Font (juce::FontOptions (juce::jmax (10.0f, l.getHeight() * 0.62f)));
+            return juce::Font (
+                juce::FontOptions (
+                    juce::jmax (10.0f, label.getHeight() * 0.62f)
+                )
+            );
         }
 
         juce::Font getComboBoxFont (juce::ComboBox& box) override
         {
-            return juce::Font (juce::FontOptions (juce::jlimit (13.0f, 17.0f, box.getHeight() * 0.42f)));
+            return juce::Font (
+                juce::FontOptions (
+                    juce::jlimit (13.0f, 17.0f, box.getHeight() * 0.42f)
+                )
+            );
         }
 
         juce::Font getPopupMenuFont() override
@@ -173,6 +170,20 @@ namespace mfx
         }
 
         juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
+        {
+            return juce::Font (
+                juce::FontOptions (
+                    juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)
+                )
+            );
+        }
+
+        juce::Font getLabelFont (juce::Label& l) override
+        {
+            return juce::Font (juce::FontOptions (juce::jmax (10.0f, l.getHeight() * 0.62f)));
+        }
+
+juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
         {
             return juce::Font (juce::FontOptions (juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)));
         }
