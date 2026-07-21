@@ -42,8 +42,8 @@ namespace mfx
             if (dragging)
             {
                 auto cell = juce::Rectangle<float> (dragMouseX - tabW * 0.5f, b.getY(), tabW, b.getHeight()).reduced (3.0f);
-                juce::Colour accent = Palette::effectColour ((int) order[(size_t) dragStartSlot]);
-                drawTab (g, cell, accent, effectDisplayNames[(int) order[(size_t) dragStartSlot]], true, true);
+                juce::Colour accent = Palette::effectColour ((int) draggedEffect);
+                drawTab (g, cell, accent, effectDisplayNames[(int) draggedEffect], true, true);
             }
         }
 
@@ -58,6 +58,8 @@ namespace mfx
             dragMouseX = e.position.x;
             dragging = false; // becomes true only once the mouse actually moves past a threshold
             movedEnough = false;
+            if (slot < numEffects)
+                draggedEffect = order[(size_t) slot];
         }
 
         void mouseDrag (const juce::MouseEvent& e) override
@@ -116,5 +118,6 @@ namespace mfx
         int dragStartSlot = 0, dragCurrentSlot = 0;
         float dragStartX = 0.0f, dragMouseX = 0.0f;
         bool dragging = false, movedEnough = false;
+        EffectId draggedEffect = EffectId::Drive;
     };
 }

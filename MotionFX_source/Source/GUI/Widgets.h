@@ -7,6 +7,21 @@
 
 namespace mfx
 {
+    class EditableSlider : public juce::Slider
+    {
+    public:
+        void mouseDoubleClick (const juce::MouseEvent& event) override
+        {
+            if (isTextBoxEditable())
+            {
+                showTextBox();
+                return;
+            }
+
+            juce::Slider::mouseDoubleClick (event);
+        }
+    };
+
     //==============================================================================
     class LabeledKnob : public juce::Component
     {
@@ -28,6 +43,12 @@ namespace mfx
             addAndMakeVisible (label);
 
             attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, paramId, slider);
+
+            if (auto* parameter = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (paramId)))
+            {
+                const auto interval = parameter->getNormalisableRange().interval;
+                slider.setNumDecimalPlacesToDisplay (interval >= 1.0f ? 0 : 3);
+            }
         }
 
         void resized() override
@@ -37,7 +58,7 @@ namespace mfx
             slider.setBounds (b);
         }
 
-        juce::Slider slider;
+        EditableSlider slider;
     private:
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
@@ -67,8 +88,8 @@ namespace mfx
         {
             auto b = getLocalBounds();
             if (label.getText().isNotEmpty())
-                label.setBounds (b.removeFromTop (14));
-            combo.setBounds (b);
+                label.setBounds (b.removeFromTop (16));
+            combo.setBounds (b.reduced (0, 1));
         }
 
         juce::ComboBox combo;

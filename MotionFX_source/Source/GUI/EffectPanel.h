@@ -96,10 +96,10 @@ namespace mfx
     private:
         void layoutLeftPanel (juce::Rectangle<int> left)
         {
-            auto top = left.removeFromTop (62);
-            modDepthKnob->setBounds (top.removeFromRight (60));
-            top.removeFromRight (6);
-            modSourceCombo->setBounds (top.removeFromTop (26));
+            auto top = left.removeFromTop (76);
+            modDepthKnob->setBounds (top.removeFromRight (70));
+            top.removeFromRight (8);
+            modSourceCombo->setBounds (top.removeFromTop (48));
             left.removeFromTop (8);
 
             auto ctx = left;

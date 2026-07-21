@@ -135,7 +135,73 @@ int main()
     std::cout << "Factory presets found: " << numFactory << " (expect 16)" << std::endl;
     if (numFactory != 16) { std::cout << "  [FAIL] preset count mismatch" << std::endl; ++failures; }
 
+    // Init must be a genuinely clean starting point: every processing module and hidden sync toggle disabled.
+    proc.presetManager.loadInitPreset();
+    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })
+    {
+        const juce::String prefix (id);
+        for (auto* suffix : { "enabled", "lfo_synced", "motion_synced", "seq_synced" })
+        {
+            auto* value = proc.apvts.getRawParameterValue (prefix + "_" + suffix);
+            if (value == nullptr || value->load() > 0.5f)
+            {
+                std::cout << "  [FAIL] Init leaves " << prefix << "_" << suffix << " enabled" << std::endl;
+                ++failures;
+            }
+        }
+    }
 
+    for (auto* id : { "stutter_enabled", "master_matchgain" })
+    {
+        auto* value = proc.apvts.getRawParameterValue (id);
+        if (value == nullptr || value->load() > 0.5f)
+        {
+            std::cout << "  [FAIL] Init leaves " << id << " enabled" << std::endl;
+            ++failures;
+        }
+    }
+
+    // Preset identity and dirty state must survive a host session save/restore.
+    if (numFactory > 0)
+    {
+        proc.presetManager.loadFactoryPreset (0);
+        const auto expectedName = proc.presetManager.getCurrentName();
+
+        if (proc.presetManager.isCurrentPresetModified())
+        {
+            std::cout << "  [FAIL] freshly loaded preset is already marked modified" << std::endl;
+            ++failures;
+        }
+
+        if (auto* input = proc.apvts.getParameter ("master_input"))
+            input->setValueNotifyingHost (input->convertTo0to1 (3.0f));
+
+        if (! proc.presetManager.isCurrentPresetModified())
+        {
+            std::cout << "  [FAIL] parameter edit did not mark the preset modified" << std::endl;
+            ++failures;
+        }
+
+        juce::MemoryBlock sessionState;
+        proc.getStateInformation (sessionState);
+
+        MotionFXAudioProcessor restored;
+        restored.setStateInformation (sessionState.getData(), (int) sessionState.getSize());
+
+        if (restored.presetManager.getCurrentName() != expectedName)
+        {
+            std::cout << "  [FAIL] preset name was not restored with the host session" << std::endl;
+            ++failures;
+        }
+
+        if (! restored.presetManager.isCurrentPresetModified())
+        {
+            std::cout << "  [FAIL] modified marker was not restored with the host session" << std::endl;
+            ++failures;
+        }
+    }
+
+    proc.presetManager.loadInitPreset();
 
     // 1) default state, a few sample rates / block sizes
     for (double sr : { 44100.0, 48000.0, 96000.0 })

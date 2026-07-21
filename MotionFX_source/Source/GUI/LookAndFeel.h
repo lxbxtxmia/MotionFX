@@ -146,6 +146,17 @@ namespace mfx
             g.fillPath (arrow);
         }
 
+        juce::Font getComboBoxFont (juce::ComboBox& box) override
+        {
+            const auto size = juce::jlimit (12.0f, 16.0f, box.getHeight() * 0.45f);
+            return juce::Font (juce::FontOptions (size));
+        }
+
+        juce::Font getPopupMenuFont() override
+        {
+            return juce::Font (juce::FontOptions (14.0f));
+        }
+
         juce::Font getLabelFont (juce::Label& l) override
         {
             return juce::Font (juce::FontOptions (juce::jmax (10.0f, l.getHeight() * 0.62f)));

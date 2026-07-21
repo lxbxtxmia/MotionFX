@@ -23,8 +23,9 @@ namespace mfx
         void attach (juce::AudioProcessorValueTreeState* s, OrderGetter g, OrderSetter setr)
         {
             apvts = s; orderGetter = std::move (g); orderSetter = std::move (setr);
-            if (defaultStateXml.isEmpty()) defaultStateXml = buildStateXmlString();
+            if (defaultStateXml.isEmpty()) defaultStateXml = buildStateXmlString (false);
             refreshUserPresetList();
+            markCurrentStateClean();
         }
 
         static juce::File getDefaultPresetDirectory();
@@ -47,15 +48,19 @@ namespace mfx
         void loadByCombinedIndex (int index);
         int getCurrentIndex() const noexcept { return currentIndex; }
         juce::String getCurrentName() const noexcept { return currentName; }
+        juce::String getDisplayName() const;
+        bool isCurrentPresetModified() const;
         void next();
         void previous();
 
-        juce::String getFullStateXml() const { return buildStateXmlString(); }
-        void restoreFullStateXml (const juce::String& xml) { applyStateXmlString (xml); }
+        juce::String getFullStateXml() const { return buildStateXmlString (true); }
+        void restoreFullStateXml (const juce::String& xml) { applyStateXmlString (xml, true); }
 
     private:
-        juce::String buildStateXmlString() const;
-        void applyStateXmlString (const juce::String& xml);
+        juce::String buildStateXmlString (bool includePresetMetadata) const;
+        void applyStateXmlString (const juce::String& xml, bool restorePresetMetadata = false);
+        juce::int64 computeStateHash() const;
+        void markCurrentStateClean();
         juce::File resolveRelativePresetPath (const juce::String& relativePath) const;
 
         juce::AudioProcessorValueTreeState* apvts = nullptr;
@@ -66,5 +71,7 @@ namespace mfx
         int currentIndex = 0;
         juce::String currentName = "Init";
         juce::String defaultStateXml;
+        juce::int64 cleanStateHash = 0;
+        bool hasCleanStateHash = false;
     };
 }

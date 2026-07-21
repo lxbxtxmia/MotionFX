@@ -14,11 +14,15 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseUp (const juce::MouseEvent&) override;
 
 private:
     void setScalePercent (int percent);
     void showPresetMenu();
     void showOptionsMenu();
+    void showAboutDialog();
+    void showChangelogDialog();
+    void showScrollableTextDialog (const juce::String& title, const juce::String& text);
     void refreshPresetLabel();
     void savePresetDialog();
     void createPresetFolderDialog();
@@ -35,7 +39,7 @@ private:
     // header
     juce::Label titleLabel;
     juce::TextButton presetNameButton;
-    juce::TextButton prevPresetBtn { "<" }, nextPresetBtn { ">" }, presetMenuBtn { juce::CharPointer_UTF8 ("\xe2\x98\xb0") };
+    juce::TextButton prevPresetBtn { "<" }, nextPresetBtn { ">" };
     juce::TextButton savePresetBtn { "Save" }, optionsBtn { juce::CharPointer_UTF8 ("\xe2\x9a\x99") };
 
     std::unique_ptr<mfx::LabeledKnob> inputKnob, outputKnob, dryWetKnob;

@@ -25,13 +25,14 @@ namespace mfx
 
     void PresetManager::loadInitPreset()
     {
-        if (defaultStateXml.isEmpty() && apvts != nullptr) defaultStateXml = buildStateXmlString();
+        if (defaultStateXml.isEmpty() && apvts != nullptr) defaultStateXml = buildStateXmlString (false);
         applyStateXmlString (defaultStateXml);
         if (orderSetter)
             orderSetter ({ EffectId::Drive, EffectId::Retro, EffectId::Pan,
                             EffectId::Width, EffectId::Volume, EffectId::Space });
         currentName = "Init";
         currentIndex = 0;
+        markCurrentStateClean();
     }
 
     int PresetManager::getNumFactoryPresets() const { return (int) getFactoryPresets().size(); }
@@ -56,6 +57,7 @@ namespace mfx
         for (auto& ov : fps[(size_t) index].overrides) setParam (*apvts, ov.first, ov.second);
         currentName = fps[(size_t) index].name;
         currentIndex = 1 + index;
+        markCurrentStateClean();
     }
 
     juce::File PresetManager::resolveRelativePresetPath (const juce::String& relativePath) const
@@ -79,10 +81,10 @@ namespace mfx
         {
             return a.relativePath.compareIgnoreCase (b.relativePath) < 0;
         });
-        if (defaultStateXml.isEmpty() && apvts != nullptr) defaultStateXml = buildStateXmlString();
+        if (defaultStateXml.isEmpty() && apvts != nullptr) defaultStateXml = buildStateXmlString (false);
     }
 
-    juce::String PresetManager::buildStateXmlString() const
+    juce::String PresetManager::buildStateXmlString (bool includePresetMetadata) const
     {
         if (apvts == nullptr) return {};
         auto state = apvts->copyState();
@@ -94,14 +96,40 @@ namespace mfx
             for (int i = 0; i < (int) order.size(); ++i)
                 orderXml->setAttribute ("slot" + juce::String (i), (int) order[(size_t) i]);
         }
+
+        if (includePresetMetadata)
+        {
+            auto* metadata = xml->createNewChildElement ("PRESET_META");
+            metadata->setAttribute ("name", currentName);
+            metadata->setAttribute ("index", currentIndex);
+            metadata->setAttribute ("hasCleanHash", hasCleanStateHash ? 1 : 0);
+            metadata->setAttribute ("cleanHash", juce::String (cleanStateHash));
+        }
+
         return xml->toString();
     }
 
-    void PresetManager::applyStateXmlString (const juce::String& xmlString)
+    void PresetManager::applyStateXmlString (const juce::String& xmlString, bool restorePresetMetadata)
     {
         if (apvts == nullptr || xmlString.isEmpty()) return;
         auto xml = juce::XmlDocument::parse (xmlString);
         if (xml == nullptr) return;
+
+        bool restoredMetadata = false;
+        if (auto* metadata = xml->getChildByName ("PRESET_META"))
+        {
+            if (restorePresetMetadata)
+            {
+                currentName = metadata->getStringAttribute ("name", "Restored Session");
+                currentIndex = metadata->getIntAttribute ("index", 0);
+                hasCleanStateHash = metadata->getBoolAttribute ("hasCleanHash", false);
+                cleanStateHash = metadata->getStringAttribute ("cleanHash").getLargeIntValue();
+                restoredMetadata = true;
+            }
+
+            xml->removeChildElement (metadata, true);
+        }
+
         if (auto* orderXml = xml->getChildByName ("ORDER"))
         {
             if (orderSetter)
@@ -114,7 +142,41 @@ namespace mfx
             xml->removeChildElement (orderXml, true);
         }
         auto tree = juce::ValueTree::fromXml (*xml);
-        if (tree.isValid()) apvts->replaceState (tree);
+        if (tree.isValid())
+        {
+            apvts->replaceState (tree);
+
+            if (restorePresetMetadata && (! restoredMetadata || ! hasCleanStateHash))
+            {
+                if (! restoredMetadata)
+                {
+                    currentName = "Restored Session";
+                    currentIndex = 0;
+                }
+                markCurrentStateClean();
+            }
+        }
+    }
+
+    juce::int64 PresetManager::computeStateHash() const
+    {
+        return buildStateXmlString (false).hashCode64();
+    }
+
+    void PresetManager::markCurrentStateClean()
+    {
+        cleanStateHash = computeStateHash();
+        hasCleanStateHash = true;
+    }
+
+    bool PresetManager::isCurrentPresetModified() const
+    {
+        return hasCleanStateHash && computeStateHash() != cleanStateHash;
+    }
+
+    juce::String PresetManager::getDisplayName() const
+    {
+        return currentName + (isCurrentPresetModified() ? "*" : "");
     }
 
     bool PresetManager::createPresetFolder (const juce::String& relativeFolder)
@@ -129,7 +191,7 @@ namespace mfx
         auto dir = relativeFolder.isEmpty() ? getPresetDirectory() : resolveRelativePresetPath (relativeFolder);
         if (dir == juce::File() || (! dir.exists() && ! dir.createDirectory())) return false;
         auto file = dir.getChildFile (juce::File::createLegalFileName (name.trim()) + ".mfxpreset");
-        const bool ok = file.replaceWithText (buildStateXmlString());
+        const bool ok = file.replaceWithText (buildStateXmlString (false));
         if (ok)
         {
             currentName = name.trim();
@@ -138,6 +200,7 @@ namespace mfx
             for (int i = 0; i < (int) userPresets.size(); ++i)
                 if (userPresets[(size_t) i].relativePath == relative)
                     currentIndex = 1 + getNumFactoryPresets() + i;
+            markCurrentStateClean();
         }
         return ok;
     }
@@ -151,6 +214,7 @@ namespace mfx
         for (int i = 0; i < (int) userPresets.size(); ++i)
             if (userPresets[(size_t) i].relativePath == relativePath)
                 currentIndex = 1 + getNumFactoryPresets() + i;
+        markCurrentStateClean();
         return true;
     }
 

@@ -5,6 +5,31 @@ using namespace mfx;
 
 namespace
 {
+    class ScrollableTextDialogContent final : public juce::Component
+    {
+    public:
+        explicit ScrollableTextDialogContent (const juce::String& text)
+        {
+            editor.setMultiLine (true);
+            editor.setReadOnly (true);
+            editor.setScrollbarsShown (true);
+            editor.setText (text, false);
+            editor.setColour (juce::TextEditor::backgroundColourId, Palette::bg1);
+            editor.setColour (juce::TextEditor::textColourId, Palette::text);
+            editor.setColour (juce::TextEditor::outlineColourId, Palette::stroke);
+            addAndMakeVisible (editor);
+            setSize (620, 440);
+        }
+
+        void resized() override
+        {
+            editor.setBounds (getLocalBounds().reduced (12));
+        }
+
+    private:
+        juce::TextEditor editor;
+    };
+
     EffectPanelSpec makeSpec (EffectId id)
     {
         EffectPanelSpec s;
@@ -47,19 +72,25 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     titleLabel.setText ("MOTIONFX", juce::dontSendNotification);
     titleLabel.setFont (juce::Font (juce::FontOptions (22.0f)).withStyle (juce::Font::bold));
     titleLabel.setColour (juce::Label::textColourId, Palette::teal);
+    titleLabel.setTooltip ("About MotionFX");
+    titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    titleLabel.addMouseListener (this, false);
     content.addAndMakeVisible (titleLabel);
 
     presetNameButton.setClickingTogglesState (false);
     presetNameButton.setTooltip ("Open preset browser");
+    prevPresetBtn.setTooltip ("Previous preset");
+    nextPresetBtn.setTooltip ("Next preset");
+    savePresetBtn.setTooltip ("Save preset");
+    optionsBtn.setTooltip ("Options");
     content.addAndMakeVisible (presetNameButton);
     presetNameButton.onClick = [this] { showPresetMenu(); };
 
-    for (auto* btn : { &prevPresetBtn, &nextPresetBtn, &presetMenuBtn, &savePresetBtn, &optionsBtn })
+    for (auto* btn : { &prevPresetBtn, &nextPresetBtn, &savePresetBtn, &optionsBtn })
         content.addAndMakeVisible (btn);
 
     prevPresetBtn.onClick = [this] { processor.presetManager.previous(); refreshPresetLabel(); };
     nextPresetBtn.onClick = [this] { processor.presetManager.next(); refreshPresetLabel(); };
-    presetMenuBtn.onClick = [this] { showPresetMenu(); };
     savePresetBtn.onClick = [this] { savePresetDialog(); };
     optionsBtn.onClick = [this] { showOptionsMenu(); };
 
@@ -160,14 +191,13 @@ void MotionFXAudioProcessorEditor::resized()
     inputKnob->setBounds (masterArea.removeFromRight (86));
 
     auto presetBar = header;
-    optionsBtn.setBounds (presetBar.removeFromRight (36).reduced (2, 10));
+    optionsBtn.setBounds (presetBar.removeFromRight (36).reduced (2, 12));
     presetBar.removeFromRight (4);
     savePresetBtn.setBounds (presetBar.removeFromRight (56).reduced (0, 12));
     presetBar.removeFromRight (4);
-    nextPresetBtn.setBounds (presetBar.removeFromRight (28).reduced (0, 10));
-    presetMenuBtn.setBounds (presetBar.removeFromRight (28).reduced (0, 10));
-    prevPresetBtn.setBounds (presetBar.removeFromLeft (28).reduced (0, 10));
-    presetNameButton.setBounds (presetBar);
+    nextPresetBtn.setBounds (presetBar.removeFromRight (28).reduced (0, 12));
+    prevPresetBtn.setBounds (presetBar.removeFromLeft (28).reduced (0, 12));
+    presetNameButton.setBounds (presetBar.reduced (0, 12));
 
     b.removeFromTop (10);
     tabStrip.setBounds (b.removeFromTop (40));
@@ -188,12 +218,76 @@ void MotionFXAudioProcessorEditor::resized()
 
 void MotionFXAudioProcessorEditor::refreshPresetLabel()
 {
-    presetNameButton.setButtonText (processor.presetManager.getCurrentName());
+    const auto displayName = processor.presetManager.getDisplayName();
+    if (presetNameButton.getButtonText() != displayName)
+        presetNameButton.setButtonText (displayName);
+
+    presetNameButton.setTooltip (processor.presetManager.isCurrentPresetModified()
+                                     ? "Preset modified — click to browse presets"
+                                     : "Open preset browser");
 }
 
 void MotionFXAudioProcessorEditor::timerCallback()
 {
     tabStrip.setOrder (processor.getOrder());
+    refreshPresetLabel();
+}
+
+void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
+{
+    if (event.eventComponent == &titleLabel)
+        showAboutDialog();
+}
+
+void MotionFXAudioProcessorEditor::showScrollableTextDialog (const juce::String& title, const juce::String& text)
+{
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (new ScrollableTextDialogContent (text));
+    options.dialogTitle = title;
+    options.dialogBackgroundColour = Palette::bg0;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.launchAsync();
+}
+
+void MotionFXAudioProcessorEditor::showAboutDialog()
+{
+    showScrollableTextDialog ("About MotionFX", R"MFXABOUT(MotionFX 0.3.0 — Build 3
+
+Multi-effect modulation VST3.
+
+Direction and development: lxbxtxmia
+Development assistance: Claude and ChatGPT
+
+Built with JUCE 8, C++20, CMake and the VST3 format.
+
+Resources
+- JUCE framework
+- Steinberg VST3 SDK through JUCE
+- GitHub Actions continuous integration
+
+Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
+}
+
+void MotionFXAudioProcessorEditor::showChangelogDialog()
+{
+    showScrollableTextDialog ("MotionFX Changelog", R"MFXCHANGELOG(0.3.0 - Block 3
+- Preset identity and modified-state persistence
+- Clean Init state
+- Header and modulation-source readability fixes
+- Stable drag-and-drop tab identity
+- Direct numeric value entry and compact decimals
+- About, resources and changelog windows
+
+Block 2
+- Preset browser and recursive user folders
+- Portable CMake and automated builds
+
+Block 1
+- DSP pause on stopped host transport
+- Selected-effect identity preserved during reorder
+- Gain Match naming update)MFXCHANGELOG");
 }
 
 void MotionFXAudioProcessorEditor::showPresetMenu()
@@ -310,6 +404,10 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     menu.addSeparator();
     menu.addItem (1, "Choose Preset Folder...");
     menu.addItem (2, "Reset Preset Folder to Default");
+    menu.addItem (6, "Open Preset Folder");
+    menu.addSeparator();
+    menu.addItem (7, "About MotionFX...");
+    menu.addItem (8, "Changelog...");
 
     menu.showMenuAsync (juce::PopupMenu::Options(), [this] (int result)
     {
@@ -336,5 +434,11 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
         {
             processor.presetManager.setPresetDirectory (mfx::PresetManager::getDefaultPresetDirectory());
         }
+        else if (result == 6)
+        {
+            processor.presetManager.getPresetDirectory().startAsProcess();
+        }
+        else if (result == 7) showAboutDialog();
+        else if (result == 8) showChangelogDialog();
     });
 }
