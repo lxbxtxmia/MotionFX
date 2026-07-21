@@ -68,7 +68,7 @@ target_link_libraries(MotionFXAudioTest PRIVATE
 )
 
 juce_add_gui_app(MotionFXGuiTest
-    PRODUCT_NAME "MotionFX GUI Test"
+    PRODUCT_NAME "MotionFXGuiTest"
 )
 
 target_sources(MotionFXGuiTest PRIVATE
