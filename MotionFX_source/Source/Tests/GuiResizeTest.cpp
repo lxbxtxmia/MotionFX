@@ -51,7 +51,10 @@ public:
                 editor->paintEntireComponent (g, true);
             }
 
-            auto outFile = juce::File ("/home/claude/gui_snapshots/scale_" + juce::String (s.pct) + "pct.png");
+            auto snapshotDirectory = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("MotionFX").getChildFile ("gui_snapshots");
+
+            auto outFile = snapshotDirectory.getChildFile ("scale_" + juce::String (s.pct) + "pct.png");
+
             outFile.getParentDirectory().createDirectory();
             juce::PNGImageFormat png;
             juce::FileOutputStream stream (outFile);
