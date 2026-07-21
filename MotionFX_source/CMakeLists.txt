@@ -67,7 +67,11 @@ target_link_libraries(MotionFXAudioTest PRIVATE
     juce::juce_gui_extra
 )
 
-add_executable(MotionFXGuiTest
+juce_add_gui_app(MotionFXGuiTest
+    PRODUCT_NAME "MotionFX GUI Test"
+)
+
+target_sources(MotionFXGuiTest PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/PresetManager.cpp
