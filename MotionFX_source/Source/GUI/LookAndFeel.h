@@ -146,7 +146,7 @@ namespace mfx
             g.fillPath (arrow);
         }
 
-                juce::Font getLabelFont (juce::Label& label) override
+        juce::Font getLabelFont (juce::Label& label) override
         {
             return juce::Font (
                 juce::FontOptions (
@@ -176,16 +176,6 @@ namespace mfx
                     juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)
                 )
             );
-        }
-
-        juce::Font getLabelFont (juce::Label& l) override
-        {
-            return juce::Font (juce::FontOptions (juce::jmax (10.0f, l.getHeight() * 0.62f)));
-        }
-
-juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
-        {
-            return juce::Font (juce::FontOptions (juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)));
         }
 
         void drawTabButton (juce::TabBarButton&, juce::Graphics&, bool, bool) override {}
