@@ -37,13 +37,18 @@ jobs:
         run: cmake -S MotionFX_source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --target MotionFX_VST3 MotionFXAudioTest MotionFXGuiTest
+
       - name: Run audio integrity test
         run: ./build/MotionFXAudioTest
-      - name: List built files
-        run: find build -maxdepth 4 -type f | sort
+
+      - name: Locate GUI test executable
+        run: |
+          echo "Executables found:"
+          find build -type f -executable -print
+
       - name: Run GUI resize test
         run: |
-          GUI_TEST="$(find build -type f -name MotionFXGuiTest -perm -111 | head -n 1)"
+          GUI_TEST="$(find build -type f -name 'MotionFXGuiTest' -executable | head -n 1)"
           echo "Running: $GUI_TEST"
           test -n "$GUI_TEST"
           xvfb-run -a "$GUI_TEST"
