@@ -37,7 +37,7 @@ jobs:
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
             libxrandr-dev libxrender-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev xvfb
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S MotionFX_source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --target MotionFX_VST3 MotionFXAudioTest MotionFXGuiTest
       - name: Run audio integrity test
