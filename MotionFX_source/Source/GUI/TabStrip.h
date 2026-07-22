@@ -150,8 +150,9 @@ namespace mfx
                 graphics.setColour (selected ? Palette::text : Palette::textDim);
             }
 
-            graphics.setFont (juce::Font (juce::FontOptions (
-                juce::jmin (14.0f, cell.getHeight() * 0.32f))).withStyle (juce::Font::bold));
+            graphics.setFont (FontBank::font (
+                juce::jmin (14.0f, cell.getHeight() * 0.32f),
+                true));
             graphics.drawFittedText (label, cell.toNearestInt(),
                                      juce::Justification::centred, 1);
         }

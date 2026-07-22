@@ -24,56 +24,137 @@ public:
 
     void runTest()
     {
-        auto proc = std::make_unique<MotionFXAudioProcessor>();
-        proc->prepareToPlay (48000.0, 512);
+        const auto oldTheme =
+            mfx::UiPreferences::instance().getThemeId();
+        const bool oldContrast =
+            mfx::UiPreferences::instance().isHighContrast();
+        const bool oldReducedMotion =
+            mfx::UiPreferences::instance().isReducedMotion();
+        const bool oldEnhanced =
+            mfx::UiPreferences::instance().hasEnhancedControls();
+        const bool oldLargeText =
+            mfx::UiPreferences::instance().hasLargerText();
 
-        auto editor = std::make_unique<MotionFXAudioProcessorEditor> (*proc);
-
-        struct Step { int pct; };
-        std::vector<Step> steps = { {25}, {50}, {75}, {100}, {150}, {200}, {300} };
-
-        juce::Component holder;
-        holder.setBounds (0, 0, 3400, 2300);
-        holder.setVisible (true);
-        holder.addAndMakeVisible (*editor);
-        editor->setTopLeftPosition (0, 0);
-
-        for (auto& s : steps)
+        struct ThemeCase
         {
-            editor->setSize ((int) (1080 * (s.pct / 100.0f)), (int) (720 * (s.pct / 100.0f)));
+            juce::String id;
+            bool highContrast;
+            juce::String filename;
+        };
 
-            auto bounds = editor->getLocalBounds();
-            std::cout << "Scale " << s.pct << "%: editor size = " << bounds.getWidth() << "x" << bounds.getHeight() << std::endl;
+        const std::vector<ThemeCase> themeCases {
+            { "builtin.dark", false, "dark" },
+            { "builtin.light", false, "light" },
+            { "builtin.dark", true, "dark_high_contrast" },
+            { "builtin.light", true, "light_high_contrast" }
+        };
 
-            juce::Image img (juce::Image::ARGB, bounds.getWidth(), bounds.getHeight(), true);
+        const std::vector<int> scales {
+            25, 50, 75, 100, 150, 200, 300
+        };
+
+        auto snapshotDirectory =
+            juce::File::getSpecialLocation (
+                juce::File::tempDirectory)
+                .getChildFile ("MotionFX")
+                .getChildFile ("gui_snapshots");
+        snapshotDirectory.createDirectory();
+
+        for (const auto& themeCase : themeCases)
+        {
+            mfx::UiPreferences::instance().setThemeId (
+                themeCase.id);
+            mfx::UiPreferences::instance().setHighContrast (
+                themeCase.highContrast);
+
+            auto processor =
+                std::make_unique<MotionFXAudioProcessor>();
+            processor->prepareToPlay (48000.0, 512);
+
+            auto editor =
+                std::make_unique<
+                    MotionFXAudioProcessorEditor> (*processor);
+
+            juce::Component holder;
+            holder.setBounds (0, 0, 3400, 2300);
+            holder.setVisible (true);
+            holder.addAndMakeVisible (*editor);
+            editor->setTopLeftPosition (0, 0);
+
+            for (const int scale : scales)
             {
-                juce::Graphics g (img);
-                editor->paintEntireComponent (g, true);
-            }
+                editor->setSize (
+                    (int) (1080 * (scale / 100.0f)),
+                    (int) (720 * (scale / 100.0f)));
 
-            auto snapshotDirectory = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("MotionFX").getChildFile ("gui_snapshots");
+                const auto bounds =
+                    editor->getLocalBounds();
 
-            auto outFile = snapshotDirectory.getChildFile ("scale_" + juce::String (s.pct) + "pct.png");
+                if (bounds.getWidth() <= 0
+                    || bounds.getHeight() <= 0)
+                {
+                    std::cout
+                        << "  [FAIL] invalid editor bounds"
+                        << std::endl;
+                    continue;
+                }
 
-            outFile.getParentDirectory().createDirectory();
-            juce::PNGImageFormat png;
-            juce::FileOutputStream stream (outFile);
-            if (stream.openedOk())
-            {
-                stream.setPosition (0);
-                stream.truncate();
-                png.writeImageToStream (img, stream);
-                std::cout << "  wrote " << outFile.getFullPathName() << std::endl;
-            }
-            else
-            {
-                std::cout << "  [FAIL] could not write " << outFile.getFullPathName() << std::endl;
+                juce::Image image (
+                    juce::Image::ARGB,
+                    bounds.getWidth(),
+                    bounds.getHeight(),
+                    true);
+
+                {
+                    juce::Graphics graphics (image);
+                    editor->paintEntireComponent (
+                        graphics,
+                        true);
+                }
+
+                const auto outputFile =
+                    snapshotDirectory.getChildFile (
+                        themeCase.filename
+                        + "_scale_"
+                        + juce::String (scale)
+                        + "pct.png");
+
+                juce::PNGImageFormat png;
+                juce::FileOutputStream stream (
+                    outputFile);
+
+                if (stream.openedOk())
+                {
+                    stream.setPosition (0);
+                    stream.truncate();
+                    png.writeImageToStream (
+                        image,
+                        stream);
+                }
+                else
+                {
+                    std::cout
+                        << "  [FAIL] could not write "
+                        << outputFile.getFullPathName()
+                        << std::endl;
+                }
             }
         }
 
-        editor.reset();
-        proc.reset();
-        std::cout << "GUI resize test complete, no crashes." << std::endl;
+        mfx::UiPreferences::instance().setThemeId (
+            oldTheme);
+        mfx::UiPreferences::instance().setHighContrast (
+            oldContrast);
+        mfx::UiPreferences::instance().setReducedMotion (
+            oldReducedMotion);
+        mfx::UiPreferences::instance().setEnhancedControls (
+            oldEnhanced);
+        mfx::UiPreferences::instance().setLargerText (
+            oldLargeText);
+
+        std::cout
+            << "GUI theme/resize test complete, no crashes."
+            << std::endl;
     }
 
     int getExitCode() { return 0; }

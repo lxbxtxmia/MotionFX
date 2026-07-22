@@ -1,5 +1,16 @@
 # MotionFX changelog
 
+## 0.8.0 - Block 8
+
+- Rebuilt the main header with balanced spacing and vector icon buttons.
+- Added compact, perfectly circular master knobs and cleaner flat control rendering.
+- Added a post-effect stereo peak meter with green below -6 dBFS, yellow from -6 to 0 dBFS, and red above 0 dBFS before the safety ceiling.
+- Embedded Atkinson Hyperlegible Next Regular and Bold from the official project.
+- Added persistent Dark and Light themes plus user-created `.mfxtheme` JSON files.
+- Added Accessibility options for High Contrast on any theme, Reduced Motion, Enhanced Controls and Larger Text.
+- Added Undo, Redo and Save keyboard shortcuts.
+- Expanded GUI snapshot tests across themes, high-contrast overlays and all supported interface scales.
+
 ## 0.7.0 - Block 7
 
 - Limited non-Comb filter resonance to a 12 dB total boost, with a gentler squared control curve.

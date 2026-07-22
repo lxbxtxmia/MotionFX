@@ -378,7 +378,7 @@ namespace mfx
 
             auto root = std::make_unique<juce::XmlElement> ("MOTIONFX_HISTORY");
             root->setAttribute ("formatVersion", 1);
-            root->setAttribute ("pluginVersion", "0.7.0");
+            root->setAttribute ("pluginVersion", "0.8.0");
             root->setAttribute ("cleanShutdown", cleanShutdown);
             root->setAttribute ("currentNode", currentNode);
 

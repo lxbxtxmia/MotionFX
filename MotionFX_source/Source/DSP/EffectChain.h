@@ -66,6 +66,8 @@ namespace mfx
             for (auto& level : uiOutputLevel) level.store (0.0f, std::memory_order_relaxed);
             for (auto& value : uiModValue) value.store (0.0f, std::memory_order_relaxed);
             outputLevelUi.store (0.0f, std::memory_order_relaxed);
+            outputLeftLevelUi.store (0.0f, std::memory_order_relaxed);
+            outputRightLevelUi.store (0.0f, std::memory_order_relaxed);
             uiSignalEpoch.fetch_add (1, std::memory_order_relaxed);
         }
 
@@ -165,16 +167,28 @@ namespace mfx
             matchGainSm.setTarget (matchDb);
 
             outGainSm.setTarget (dbToGain (outputGainDb));
+            float rawPeakLeft = 0.0f;
+            float rawPeakRight = 0.0f;
+
             for (int sample = 0; sample < numSamples; ++sample)
             {
                 const float matchedGain = dbToGain (matchGainSm.next());
                 const float outputGain = outGainSm.next();
-                left[sample] = flushDenorm (safetyCeiling (left[sample] * outputGain * matchedGain));
-                right[sample] = flushDenorm (safetyCeiling (right[sample] * outputGain * matchedGain));
+                const float rawLeft = left[sample] * outputGain * matchedGain;
+                const float rawRight = right[sample] * outputGain * matchedGain;
+
+                rawPeakLeft = juce::jmax (rawPeakLeft, std::abs (rawLeft));
+                rawPeakRight = juce::jmax (rawPeakRight, std::abs (rawRight));
+
+                left[sample] = flushDenorm (safetyCeiling (rawLeft));
+                right[sample] = flushDenorm (safetyCeiling (rawRight));
             }
 
-            outputLevelUi.store (stageMagnitude (buffer), std::memory_order_relaxed);
             sanitizeBuffer (buffer);
+            outputLeftLevelUi.store (rawPeakLeft, std::memory_order_relaxed);
+            outputRightLevelUi.store (rawPeakRight, std::memory_order_relaxed);
+            outputLevelUi.store (juce::jmax (rawPeakLeft, rawPeakRight),
+                                 std::memory_order_relaxed);
         }
 
         std::array<EffectId, numEffects> order {
@@ -218,6 +232,8 @@ namespace mfx
         std::array<std::atomic<float>, numEffects> uiOutputLevel {};
         std::atomic<juce::uint64> uiSignalEpoch { 0 };
         std::atomic<float> outputLevelUi { 0.0f };
+        std::atomic<float> outputLeftLevelUi { 0.0f };
+        std::atomic<float> outputRightLevelUi { 0.0f };
 
     private:
         static float stageMagnitude (const juce::AudioBuffer<float>& buffer) noexcept

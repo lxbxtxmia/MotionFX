@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
-project(MotionFX VERSION 0.7.0)
+project(MotionFX VERSION 0.8.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
 
 set(JUCE_DIR "" CACHE PATH "Path to a JUCE checkout")
 if (JUCE_DIR)
@@ -10,13 +12,26 @@ if (JUCE_DIR)
 elseif (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../JUCE/CMakeLists.txt")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../JUCE" JUCE)
 else()
-    include(FetchContent)
     FetchContent_Declare(JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG 8.0.13
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(JUCE)
 endif()
+
+# Official Atkinson Hyperlegible Next sources, pinned for reproducible builds.
+# The font is embedded into the plug-in and remains under the SIL OFL 1.1.
+FetchContent_Declare(atkinson_font
+    GIT_REPOSITORY https://github.com/googlefonts/atkinson-hyperlegible-next.git
+    GIT_TAG 7925f50f649b3813257faf2f4c0b381011f434f1)
+FetchContent_MakeAvailable(atkinson_font)
+
+juce_add_binary_data(MotionFXFonts
+    SOURCES
+        "${atkinson_font_SOURCE_DIR}/fonts/ttf/AtkinsonHyperlegibleNext-Regular.ttf"
+        "${atkinson_font_SOURCE_DIR}/fonts/ttf/AtkinsonHyperlegibleNext-Bold.ttf"
+        "${atkinson_font_SOURCE_DIR}/OFL.txt"
+)
 
 juce_add_plugin(MotionFX
     COMPANY_NAME "Prototype"
@@ -27,6 +42,7 @@ juce_add_plugin(MotionFX
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_SYNTH FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES Fx
 )
 
@@ -43,6 +59,7 @@ target_compile_definitions(MotionFX PUBLIC
 )
 
 target_link_libraries(MotionFX PRIVATE
+    MotionFXFonts
     juce::juce_audio_utils
     juce::juce_dsp
     juce::juce_audio_processors
@@ -60,6 +77,7 @@ target_compile_definitions(MotionFXAudioTest PRIVATE
     JUCE_USE_CURL=0
 )
 target_link_libraries(MotionFXAudioTest PRIVATE
+    MotionFXFonts
     juce::juce_audio_utils
     juce::juce_dsp
     juce::juce_audio_processors
@@ -83,6 +101,7 @@ target_compile_definitions(MotionFXGuiTest PRIVATE
     JUCE_USE_CURL=0
 )
 target_link_libraries(MotionFXGuiTest PRIVATE
+    MotionFXFonts
     juce::juce_audio_utils
     juce::juce_dsp
     juce::juce_audio_processors
@@ -90,11 +109,10 @@ target_link_libraries(MotionFXGuiTest PRIVATE
     juce::juce_gui_extra
 )
 
-
 # Register the executables with CTest so CI actually executes them.
 include(CTest)
 enable_testing()
 add_test(NAME MotionFXAudioIntegrity COMMAND MotionFXAudioTest)
 add_test(NAME MotionFXGuiResize COMMAND MotionFXGuiTest)
 set_tests_properties(MotionFXAudioIntegrity PROPERTIES TIMEOUT 300)
-set_tests_properties(MotionFXGuiResize PROPERTIES TIMEOUT 90)
+set_tests_properties(MotionFXGuiResize PROPERTIES TIMEOUT 120)

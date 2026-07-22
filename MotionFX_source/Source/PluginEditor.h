@@ -2,6 +2,8 @@
 #include "PluginProcessor.h"
 #include "GUI/LookAndFeel.h"
 #include "GUI/Widgets.h"
+#include "GUI/HeaderComponents.h"
+#include "GUI/AccessibilityDialog.h"
 #include "GUI/EffectPanel.h"
 #include "GUI/StutterPanel.h"
 #include "GUI/TabStrip.h"
@@ -16,14 +18,18 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseUp (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void setScalePercent (int percent);
     void showPresetMenu();
     void showOptionsMenu();
+    void showAccessibilityDialog();
     void showAboutDialog (bool openChangelog = false);
     void showChangelogDialog();
     void refreshPresetLabel();
+    void rebuildThemedControls();
+    void applyUiPreferences();
     void savePresetDialog();
     void createPresetFolderDialog();
     void showPresetLoadErrorIfAny();
@@ -41,19 +47,31 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton presetNameButton;
-    juce::TextButton prevPresetBtn { "<" };
-    juce::TextButton nextPresetBtn { ">" };
-    juce::TextButton undoBtn { "UNDO" };
-    juce::TextButton redoBtn { "REDO" };
-    juce::TextButton savePresetBtn { "Save" };
-    juce::TextButton optionsBtn {
-        juce::CharPointer_UTF8 ("\xe2\x9a\x99")
+
+    mfx::IconButton prevPresetBtn {
+        mfx::HeaderIcon::Previous
+    };
+    mfx::IconButton nextPresetBtn {
+        mfx::HeaderIcon::Next
+    };
+    mfx::IconButton undoBtn {
+        mfx::HeaderIcon::Undo
+    };
+    mfx::IconButton redoBtn {
+        mfx::HeaderIcon::Redo
+    };
+    mfx::IconButton savePresetBtn {
+        mfx::HeaderIcon::Save
+    };
+    mfx::IconButton optionsBtn {
+        mfx::HeaderIcon::Settings
     };
 
     std::unique_ptr<mfx::LabeledKnob> inputKnob;
     std::unique_ptr<mfx::LabeledKnob> outputKnob;
     std::unique_ptr<mfx::LabeledKnob> dryWetKnob;
     std::unique_ptr<mfx::LabeledToggle> matchGainToggle;
+    std::unique_ptr<mfx::StereoOutputMeter> outputMeter;
 
     mfx::TabStrip tabStrip;
     int selectedSlot = 0;

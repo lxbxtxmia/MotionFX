@@ -107,6 +107,7 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     : AudioProcessorEditor (&p), processor (p)
 {
     setLookAndFeel (&lookAndFeel);
+    setWantsKeyboardFocus (true);
     tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 450);
 
     if (processor.stateHistory != nullptr)
@@ -115,7 +116,7 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     addAndMakeVisible (content);
 
     titleLabel.setText ("MOTIONFX", juce::dontSendNotification);
-    titleLabel.setFont (juce::Font (juce::FontOptions (22.0f)).withStyle (juce::Font::bold));
+    titleLabel.setFont (FontBank::font (22.0f, true));
     titleLabel.setColour (juce::Label::textColourId, Palette::teal);
     titleLabel.setTooltip ("About MotionFX");
     titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -182,13 +183,13 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     savePresetBtn.onClick = [this] { savePresetDialog(); };
     optionsBtn.onClick = [this] { showOptionsMenu(); };
 
-    inputKnob = std::make_unique<LabeledKnob> (processor.apvts, "master_input", "INPUT", Palette::teal);
-    outputKnob = std::make_unique<LabeledKnob> (processor.apvts, "master_output", "OUTPUT", Palette::teal);
-    dryWetKnob = std::make_unique<LabeledKnob> (processor.apvts, "master_drywet", "DRY/WET", Palette::purple);
-    matchGainToggle = std::make_unique<LabeledToggle> (processor.apvts, "master_matchgain", "GAIN MATCH");
-    for (auto* c : { (juce::Component*) inputKnob.get(), (juce::Component*) outputKnob.get(),
-                     (juce::Component*) dryWetKnob.get(), (juce::Component*) matchGainToggle.get() })
-        content.addAndMakeVisible (c);
+    outputMeter = std::make_unique<StereoOutputMeter> (
+        processor.chain.outputLeftLevelUi,
+        processor.chain.outputRightLevelUi,
+        processor.chain.uiSignalEpoch);
+    content.addAndMakeVisible (*outputMeter);
+
+    rebuildThemedControls();
 
     content.addAndMakeVisible (tabStrip);
     tabStrip.setOrder (processor.getOrder());
@@ -224,14 +225,6 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
         resized();
     };
 
-    for (int e = 0; e < numEffects; ++e)
-    {
-        effectPanels[(size_t) e] = std::make_unique<EffectPanel> (processor.apvts, processor.chain, makeSpec ((EffectId) e), (EffectId) e);
-        content.addAndMakeVisible (*effectPanels[(size_t) e]);
-    }
-    stutterPanel = std::make_unique<StutterPanel> (processor.apvts, processor.chain);
-    content.addAndMakeVisible (*stutterPanel);
-
     constrainer = std::make_unique<juce::ComponentBoundsConstrainer>();
     constrainer->setFixedAspectRatio ((double) baseW / (double) baseH);
     constrainer->setSizeLimits (baseW / 4, baseH / 4, baseW * 3, baseH * 3);
@@ -240,6 +233,7 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
 
     refreshPresetLabel();
     setScalePercent (100);
+    grabKeyboardFocus();
     startTimerHz (8);
 }
 
@@ -253,12 +247,140 @@ void MotionFXAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillAll (Palette::bg0);
 }
 
+bool MotionFXAudioProcessorEditor::keyPressed (
+    const juce::KeyPress& key)
+{
+    const auto modifiers = key.getModifiers();
+    const bool command = modifiers.isCommandDown()
+                      || modifiers.isCtrlDown();
+
+    if (! command)
+        return false;
+
+    const int keyCode = key.getKeyCode();
+
+    if (keyCode == 'z' || keyCode == 'Z')
+    {
+        if (processor.stateHistory != nullptr)
+        {
+            if (modifiers.isShiftDown())
+                processor.stateHistory->redo();
+            else
+                processor.stateHistory->undo();
+        }
+
+        refreshPresetLabel();
+        tabStrip.setOrder (processor.getOrder());
+        resized();
+        return true;
+    }
+
+    if (keyCode == 'y' || keyCode == 'Y')
+    {
+        if (processor.stateHistory != nullptr)
+            processor.stateHistory->redo();
+
+        refreshPresetLabel();
+        tabStrip.setOrder (processor.getOrder());
+        resized();
+        return true;
+    }
+
+    if (keyCode == 's' || keyCode == 'S')
+    {
+        savePresetDialog();
+        return true;
+    }
+
+    return false;
+}
+
 void MotionFXAudioProcessorEditor::setScalePercent (int percent)
 {
     scalePercent = juce::jlimit (25, 300, percent);
     float scale = scalePercent / 100.0f;
     content.setTransform (juce::AffineTransform::scale (scale));
     setSize ((int) (baseW * scale), (int) (baseH * scale));
+}
+
+void MotionFXAudioProcessorEditor::rebuildThemedControls()
+{
+    inputKnob.reset();
+    outputKnob.reset();
+    dryWetKnob.reset();
+    matchGainToggle.reset();
+
+    for (auto& panel : effectPanels)
+        panel.reset();
+
+    stutterPanel.reset();
+
+    titleLabel.setFont (FontBank::font (22.0f, true));
+    titleLabel.setColour (
+        juce::Label::textColourId,
+        Palette::teal);
+
+    inputKnob = std::make_unique<LabeledKnob> (
+        processor.apvts,
+        "master_input",
+        "INPUT",
+        Palette::teal);
+    outputKnob = std::make_unique<LabeledKnob> (
+        processor.apvts,
+        "master_output",
+        "OUTPUT",
+        Palette::teal);
+    dryWetKnob = std::make_unique<LabeledKnob> (
+        processor.apvts,
+        "master_drywet",
+        "DRY/WET",
+        Palette::purple);
+    matchGainToggle = std::make_unique<LabeledToggle> (
+        processor.apvts,
+        "master_matchgain",
+        "GAIN MATCH");
+
+    inputKnob->setCompactLayout (true);
+    outputKnob->setCompactLayout (true);
+    dryWetKnob->setCompactLayout (true);
+
+    for (auto* component : {
+             (juce::Component*) inputKnob.get(),
+             (juce::Component*) outputKnob.get(),
+             (juce::Component*) dryWetKnob.get(),
+             (juce::Component*) matchGainToggle.get()
+         })
+    {
+        content.addAndMakeVisible (component);
+    }
+
+    for (int effect = 0; effect < numEffects; ++effect)
+    {
+        effectPanels[(size_t) effect] =
+            std::make_unique<EffectPanel> (
+                processor.apvts,
+                processor.chain,
+                makeSpec ((EffectId) effect),
+                (EffectId) effect);
+        content.addAndMakeVisible (
+            *effectPanels[(size_t) effect]);
+    }
+
+    stutterPanel = std::make_unique<StutterPanel> (
+        processor.apvts,
+        processor.chain);
+    content.addAndMakeVisible (*stutterPanel);
+
+    content.sendLookAndFeelChange();
+    tabStrip.repaint();
+    resized();
+    repaint();
+}
+
+void MotionFXAudioProcessorEditor::applyUiPreferences()
+{
+    lookAndFeel.refreshColours();
+    rebuildThemedControls();
 }
 
 void MotionFXAudioProcessorEditor::resized()
@@ -269,40 +391,55 @@ void MotionFXAudioProcessorEditor::resized()
     content.setBounds (0, 0, baseW, baseH);
 
     auto bounds = content.getLocalBounds().reduced (14);
-    auto header = bounds.removeFromTop (78);
+    auto header = bounds.removeFromTop (88);
 
     titleLabel.setBounds (
-        header.removeFromLeft (158).reduced (0, 10));
+        header.removeFromLeft (142).reduced (0, 17));
 
-    auto masterArea = header.removeFromRight (410);
+    auto masterArea = header.removeFromRight (398);
+
     matchGainToggle->setBounds (
-        masterArea.removeFromRight (108).reduced (2, 19));
-    dryWetKnob->setBounds (masterArea.removeFromRight (98));
-    outputKnob->setBounds (masterArea.removeFromRight (98));
-    inputKnob->setBounds (masterArea.removeFromRight (98));
+        masterArea.removeFromRight (104).reduced (1, 20));
+    masterArea.removeFromRight (7);
+
+    outputMeter->setBounds (
+        masterArea.removeFromRight (42).reduced (0, 8));
+    masterArea.removeFromRight (7);
+
+    dryWetKnob->setBounds (
+        masterArea.removeFromRight (72).translated (0, 3));
+    masterArea.removeFromRight (5);
+    outputKnob->setBounds (
+        masterArea.removeFromRight (72).translated (0, 3));
+    masterArea.removeFromRight (5);
+    inputKnob->setBounds (
+        masterArea.removeFromRight (72).translated (0, 3));
 
     auto presetBar = header;
     optionsBtn.setBounds (
-        presetBar.removeFromRight (36).reduced (1, 20));
+        presetBar.removeFromRight (36).reduced (1, 25));
     presetBar.removeFromRight (5);
     savePresetBtn.setBounds (
-        presetBar.removeFromRight (58).reduced (0, 20));
-    presetBar.removeFromRight (5);
+        presetBar.removeFromRight (36).reduced (1, 25));
+    presetBar.removeFromRight (6);
     redoBtn.setBounds (
-        presetBar.removeFromRight (44).reduced (0, 20));
+        presetBar.removeFromRight (36).reduced (1, 25));
     presetBar.removeFromRight (5);
     undoBtn.setBounds (
-        presetBar.removeFromRight (44).reduced (0, 20));
-    presetBar.removeFromRight (5);
+        presetBar.removeFromRight (36).reduced (1, 25));
+    presetBar.removeFromRight (7);
     nextPresetBtn.setBounds (
-        presetBar.removeFromRight (30).reduced (0, 20));
+        presetBar.removeFromRight (32).reduced (0, 25));
+    presetBar.removeFromRight (5);
     prevPresetBtn.setBounds (
-        presetBar.removeFromLeft (30).reduced (0, 20));
-    presetNameButton.setBounds (presetBar.reduced (0, 20));
+        presetBar.removeFromLeft (32).reduced (0, 25));
+    presetBar.removeFromLeft (5);
+    presetNameButton.setBounds (
+        presetBar.reduced (0, 25));
 
-    bounds.removeFromTop (8);
+    bounds.removeFromTop (6);
     tabStrip.setBounds (bounds.removeFromTop (42));
-    bounds.removeFromTop (10);
+    bounds.removeFromTop (9);
 
     const auto order = processor.getOrder();
 
@@ -311,6 +448,10 @@ void MotionFXAudioProcessorEditor::resized()
         const bool visible = slot == selectedSlot;
         auto* panel = effectPanels[
             (size_t) order[(size_t) slot]].get();
+
+        if (panel == nullptr)
+            continue;
+
         panel->setVisible (visible);
 
         if (visible)
@@ -318,10 +459,14 @@ void MotionFXAudioProcessorEditor::resized()
     }
 
     const bool stutterVisible = selectedSlot == numEffects;
-    stutterPanel->setVisible (stutterVisible);
 
-    if (stutterVisible)
-        stutterPanel->setBounds (bounds);
+    if (stutterPanel != nullptr)
+    {
+        stutterPanel->setVisible (stutterVisible);
+
+        if (stutterVisible)
+            stutterPanel->setBounds (bounds);
+    }
 }
 
 void MotionFXAudioProcessorEditor::refreshPresetLabel()
@@ -372,7 +517,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.7.0 - Build 7
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.8.0 - Build 8
 
 Multi-effect modulation VST3.
 
@@ -381,6 +526,10 @@ Some AI was used during the creation of this plugin, but all generated work was 
 
 Built with JUCE 8, C++20, CMake and the VST3 format.
 
+Interface font
+- Atkinson Hyperlegible Next by the Braille Institute project
+- Embedded under the SIL Open Font License 1.1
+
 Resources
 - JUCE framework
 - Steinberg VST3 SDK through JUCE
@@ -388,7 +537,16 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.7.0 - Build 7
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.8.0 - Build 8
+- Rebuilt the header with vector icon controls and compact master knobs.
+- Added a post-effect stereo peak meter with green, yellow and red dBFS zones.
+- Embedded Atkinson Hyperlegible Next Regular and Bold.
+- Added Dark, Light and custom JSON themes.
+- Added theme-independent High Contrast, Reduced Motion, Enhanced Controls and Larger Text accessibility options.
+- Added keyboard shortcuts for Undo, Redo and Save.
+- Expanded GUI tests across themes, contrast modes and interface scales.
+
+0.7.0 - Build 7
 - Limited non-Comb filter resonance to a 12 dB total boost.
 - Added continuous Stutter playhead and CLEAR refresh.
 - Improved Stutter, GAIN MATCH and TEMPO SYNC typography.
@@ -606,6 +764,31 @@ void MotionFXAudioProcessorEditor::showPresetLoadErrorIfAny()
         error);
 }
 
+void MotionFXAudioProcessorEditor::showAccessibilityDialog()
+{
+    juce::Component::SafePointer<
+        MotionFXAudioProcessorEditor> safeThis (this);
+
+    auto* contentComponent =
+        new AccessibilityDialogContent (
+            [safeThis]
+            {
+                if (safeThis != nullptr)
+                    safeThis->applyUiPreferences();
+            });
+
+    contentComponent->setLookAndFeel (&lookAndFeel);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (contentComponent);
+    options.dialogTitle = "MotionFX Accessibility";
+    options.dialogBackgroundColour = Palette::bg0;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
+}
+
 void MotionFXAudioProcessorEditor::showOptionsMenu()
 {
     juce::PopupMenu menu;
@@ -621,20 +804,51 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     }
 
     menu.addSubMenu ("Interface Scale", scaleMenu);
+
+    const auto themes =
+        UiPreferences::instance().getAvailableThemes();
+    juce::PopupMenu themeMenu;
+
+    for (int index = 0;
+         index < (int) themes.size();
+         ++index)
+    {
+        themeMenu.addItem (
+            40000 + index,
+            themes[(size_t) index].name,
+            true,
+            themes[(size_t) index].id
+                == UiPreferences::instance().getThemeId());
+    }
+
+    themeMenu.addSeparator();
+    themeMenu.addItem (14, "Open Theme Folder");
+    menu.addSubMenu ("Theme", themeMenu);
+    menu.addItem (13, "Accessibility...");
     menu.addSeparator();
 
     if (processor.stateHistory != nullptr)
     {
-        menu.addItem (10, "Undo", processor.stateHistory->canUndo());
-        menu.addItem (11, "Redo", processor.stateHistory->canRedo());
+        menu.addItem (
+            10,
+            "Undo",
+            processor.stateHistory->canUndo());
+        menu.addItem (
+            11,
+            "Redo",
+            processor.stateHistory->canRedo());
 
         juce::PopupMenu historyMenu;
-        const auto items = processor.stateHistory->getHistoryItems();
+        const auto items =
+            processor.stateHistory->getHistoryItems();
 
         for (const auto& item : items)
         {
-            const auto indentation = juce::String::repeatedString (
-                "  ", juce::jmin (4, item.depth));
+            const auto indentation =
+                juce::String::repeatedString (
+                    "  ",
+                    juce::jmin (4, item.depth));
+
             historyMenu.addItem (
                 20000 + item.nodeIndex,
                 indentation + item.text,
@@ -642,10 +856,17 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
                 item.current);
         }
 
-        menu.addSubMenu ("Change History", historyMenu, ! items.empty());
+        menu.addSubMenu (
+            "Change History",
+            historyMenu,
+            ! items.empty());
 
         if (processor.stateHistory->hasCrashRecovery())
-            menu.addItem (12, "Restore Last Crash Recovery...");
+        {
+            menu.addItem (
+                12,
+                "Restore Last Crash Recovery...");
+        }
 
         menu.addSeparator();
     }
@@ -661,13 +882,27 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     menu.addItem (7, "About / Changelog...");
 
     menu.showMenuAsync (
-        juce::PopupMenu::Options().withTargetComponent (&optionsBtn),
-        [this] (int result)
+        juce::PopupMenu::Options()
+            .withTargetComponent (&optionsBtn),
+        [this, themes] (int result)
     {
-        if (result >= 20000)
+        if (result >= 40000)
+        {
+            const int themeIndex = result - 40000;
+
+            if (themeIndex >= 0
+                && themeIndex < (int) themes.size())
+            {
+                UiPreferences::instance().setThemeId (
+                    themes[(size_t) themeIndex].id);
+                applyUiPreferences();
+            }
+        }
+        else if (result >= 20000)
         {
             if (processor.stateHistory != nullptr)
-                processor.stateHistory->jumpToNode (result - 20000);
+                processor.stateHistory->jumpToNode (
+                    result - 20000);
 
             refreshPresetLabel();
             tabStrip.setOrder (processor.getOrder());
@@ -676,6 +911,16 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
         else if (result >= 1000)
         {
             setScalePercent (result - 1000);
+        }
+        else if (result == 13)
+        {
+            showAccessibilityDialog();
+        }
+        else if (result == 14)
+        {
+            UiPreferences::instance()
+                .getThemeFolder()
+                .startAsProcess();
         }
         else if (result == 10)
         {
@@ -698,7 +943,8 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
         else if (result == 12)
         {
             if (processor.stateHistory != nullptr
-                && processor.stateHistory->restoreCrashRecovery())
+                && processor.stateHistory
+                       ->restoreCrashRecovery())
             {
                 refreshPresetLabel();
                 tabStrip.setOrder (processor.getOrder());
@@ -719,28 +965,39 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
         }
         else if (result == 1)
         {
-            auto chooser = std::make_shared<juce::FileChooser> (
-                "Choose a folder for MotionFX presets",
-                processor.presetManager.getPresetDirectory());
+            auto chooser =
+                std::make_shared<juce::FileChooser> (
+                    "Choose a folder for MotionFX presets",
+                    processor.presetManager
+                        .getPresetDirectory());
 
             chooser->launchAsync (
                 juce::FileBrowserComponent::openMode
-                    | juce::FileBrowserComponent::canSelectDirectories,
-                [this, chooser] (const juce::FileChooser& fileChooser)
+                    | juce::FileBrowserComponent
+                          ::canSelectDirectories,
+                [this, chooser] (
+                    const juce::FileChooser& fileChooser)
             {
-                const auto directory = fileChooser.getResult();
+                const auto directory =
+                    fileChooser.getResult();
+
                 if (directory != juce::File())
-                    processor.presetManager.setPresetDirectory (directory);
+                {
+                    processor.presetManager
+                        .setPresetDirectory (directory);
+                }
             });
         }
         else if (result == 2)
         {
             processor.presetManager.setPresetDirectory (
-                mfx::PresetManager::getDefaultPresetDirectory());
+                PresetManager::getDefaultPresetDirectory());
         }
         else if (result == 6)
         {
-            processor.presetManager.getPresetDirectory().startAsProcess();
+            processor.presetManager
+                .getPresetDirectory()
+                .startAsProcess();
         }
         else if (result == 7)
         {

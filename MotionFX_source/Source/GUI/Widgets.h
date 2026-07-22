@@ -63,10 +63,34 @@ namespace mfx
                             + " - double-click knob for zero; double-click value or label to type");
         }
 
+        void setCompactLayout (bool shouldBeCompact)
+        {
+            compactLayout = shouldBeCompact;
+            resized();
+        }
+
         void resized() override
         {
             auto bounds = getLocalBounds();
+
+            if (compactLayout)
+            {
+                label.setBounds (bounds.removeFromBottom (14));
+                slider.setTextBoxStyle (
+                    juce::Slider::TextBoxBelow,
+                    false,
+                    72,
+                    18);
+                slider.setBounds (bounds.reduced (2, 0));
+                return;
+            }
+
             label.setBounds (bounds.removeFromBottom (18));
+            slider.setTextBoxStyle (
+                juce::Slider::TextBoxBelow,
+                false,
+                92,
+                22);
             slider.setBounds (bounds);
         }
 
@@ -159,6 +183,7 @@ namespace mfx
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
         juce::String defaultUnitSuffix;
         int decimalPlaces = 2;
+        bool compactLayout = false;
     };
 
     //==============================================================================
@@ -254,7 +279,7 @@ namespace mfx
                 drawModulation (graphics, inner);
 
             auto labelBounds = inner.toNearestInt().removeFromTop (14);
-            graphics.setFont (juce::Font (juce::FontOptions (10.0f)));
+            graphics.setFont (FontBank::font (10.0f));
             graphics.setColour (Palette::textDim.withAlpha (0.75f));
             graphics.drawText ("IN", labelBounds, juce::Justification::topLeft);
             graphics.setColour (accent.withAlpha (0.85f));
@@ -346,6 +371,7 @@ namespace mfx
         void timerCallback() override
         {
             const auto epoch = signalEpoch.load (std::memory_order_relaxed);
+
             if (epoch != lastEpoch)
             {
                 lastEpoch = epoch;
@@ -356,23 +382,44 @@ namespace mfx
                 ++staleTicks;
             }
 
-            modulationHistory.pop_front();
-            inputHistory.pop_front();
-            outputHistory.pop_front();
-            modulationHistory.push_back (juce::jlimit (
-                0.0f, 1.0f, modulation.load (std::memory_order_relaxed)));
+            const float modulationValue = juce::jlimit (
+                0.0f,
+                1.0f,
+                modulation.load (std::memory_order_relaxed));
 
-            // Two grace ticks avoid false decay with very large host buffer sizes.
-            if (staleTicks <= 2)
+            const bool signalFresh = staleTicks <= 2;
+            const float inputValue = signalFresh
+                ? visualLevel (input.load (std::memory_order_relaxed))
+                : decayLevel (inputHistory.back());
+            const float outputValue = signalFresh
+                ? visualLevel (output.load (std::memory_order_relaxed))
+                : decayLevel (outputHistory.back());
+
+            if (UiPreferences::instance().isReducedMotion())
             {
-                inputHistory.push_back (visualLevel (input.load (std::memory_order_relaxed)));
-                outputHistory.push_back (visualLevel (output.load (std::memory_order_relaxed)));
+                std::fill (
+                    modulationHistory.begin(),
+                    modulationHistory.end(),
+                    modulationValue);
+                std::fill (
+                    inputHistory.begin(),
+                    inputHistory.end(),
+                    inputValue);
+                std::fill (
+                    outputHistory.begin(),
+                    outputHistory.end(),
+                    outputValue);
             }
             else
             {
-                inputHistory.push_back (decayLevel (inputHistory.back()));
-                outputHistory.push_back (decayLevel (outputHistory.back()));
+                modulationHistory.pop_front();
+                inputHistory.pop_front();
+                outputHistory.pop_front();
+                modulationHistory.push_back (modulationValue);
+                inputHistory.push_back (inputValue);
+                outputHistory.push_back (outputValue);
             }
+
             repaint();
         }
 
@@ -497,7 +544,7 @@ namespace mfx
                 if (enabled && showChoiceText && cellWidth > 28.0f && value < choices.size())
                 {
                     graphics.setColour (Palette::bg0);
-                    graphics.setFont (juce::Font (juce::FontOptions (juce::jmin (10.0f, cell.getHeight() * 0.24f))));
+                    graphics.setFont (FontBank::font (juce::jmin (10.0f, cell.getHeight() * 0.24f)));
                     graphics.drawFittedText (choices[value], cell.toNearestInt().reduced (2), juce::Justification::centred, 1);
                 }
             }
@@ -617,7 +664,7 @@ namespace mfx
                     {
                         const juce::String valueText = juce::String (semitones > 0 ? "+" : "") + juce::String (semitones);
                         graphics.setColour (Palette::text);
-                        graphics.setFont (juce::Font (juce::FontOptions (juce::jmin (10.0f, cell.getHeight() * 0.23f))).withStyle (juce::Font::bold));
+                        graphics.setFont (FontBank::font (juce::jmin (10.0f, cell.getHeight() * 0.23f), true));
                         graphics.drawFittedText (valueText, cell.toNearestInt().reduced (1), juce::Justification::centred, 1);
                     }
                 }
