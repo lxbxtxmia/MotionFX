@@ -167,13 +167,47 @@ int main()
 
     mfx::StutterEngine stutterTimingTest;
     stutterTimingTest.prepare (48000.0);
-    if (stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat4, 120.0) != 24000
-        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat8, 120.0) != 12000
-        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat16, 120.0) != 6000
-        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::StepAction::Repeat32, 120.0) != 3000)
+    if (stutterTimingTest.getNominalRepeatLengthSamples (mfx::RepeatAction::Quarter, 120.0) != 24000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::RepeatAction::Eighth, 120.0) != 12000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::RepeatAction::Sixteenth, 120.0) != 6000
+        || stutterTimingTest.getNominalRepeatLengthSamples (mfx::RepeatAction::ThirtySecond, 120.0) != 3000)
     {
         std::cout << "  [FAIL] Stutter repeat lengths are not absolute musical divisions" << std::endl;
         ++failures;
+    }
+
+    if (! nearlyEqual (mfx::StutterEngine::pitchRatioForSemitones (12), 2.0)
+        || ! nearlyEqual (mfx::StutterEngine::pitchRatioForSemitones (-12), 0.5)
+        || ! nearlyEqual (mfx::StutterEngine::pitchRatioForSemitones (0), 1.0))
+    {
+        std::cout << "  [FAIL] realtime pitch semitone ratios are incorrect" << std::endl;
+        ++failures;
+    }
+
+    stutterTimingTest.setPitchStep (0, true, 12);
+    stutterTimingTest.setPitchStep (1, true, -7);
+    stutterTimingTest.setPitchStep (2, false, 24);
+    if (! stutterTimingTest.isPitchStepActive (0)
+        || ! stutterTimingTest.isPitchStepActive (1)
+        || stutterTimingTest.isPitchStepActive (2)
+        || stutterTimingTest.getPitchSemitonesForStep (0) != 12
+        || stutterTimingTest.getPitchSemitonesForStep (1) != -7
+        || stutterTimingTest.getPitchSemitonesForStep (2) != 24)
+    {
+        std::cout << "  [FAIL] per-step Pitch values are not independent" << std::endl;
+        ++failures;
+    }
+
+    for (auto* id : { "stutter_repeat_step0", "stutter_reverse_step0",
+                      "stutter_tape_step0", "stutter_pitch_step0",
+                      "stutter_pitch_semitones_step0", "stutter_gate_step0",
+                      "stutter_pitch_grain_ms" })
+    {
+        if (proc.apvts.getParameter (id) == nullptr)
+        {
+            std::cout << "  [FAIL] missing Block 6 Stutter parameter " << id << std::endl;
+            ++failures;
+        }
     }
 
     if (proc.apvts.getParameter ("filter_mode") == nullptr
@@ -294,9 +328,24 @@ int main()
     if (auto* p = proc.apvts.getParameter ("space_decay")) p->setValueNotifyingHost (1.0f); // max feedback
     if (auto* p = proc.apvts.getParameter ("stutter_enabled")) p->setValueNotifyingHost (1.0f);
     if (auto* p = proc.apvts.getParameter ("stutter_mix")) p->setValueNotifyingHost (1.0f);
+    if (auto* p = proc.apvts.getParameter ("stutter_pitch_grain_ms"))
+        p->setValueNotifyingHost (p->convertTo0to1 (18.0f));
     for (int i = 0; i < 16; ++i)
-        if (auto* p = proc.apvts.getParameter ("stutter_step" + juce::String (i)))
-            p->setValueNotifyingHost (p->convertTo0to1 ((float) (1 + (i % 10))));
+    {
+        const juce::String step (i);
+        if (auto* p = proc.apvts.getParameter ("stutter_repeat_step" + step))
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) (1 + i % 4)));
+        if (auto* p = proc.apvts.getParameter ("stutter_reverse_step" + step))
+            p->setValueNotifyingHost (i % 2 == 0 ? 1.0f : 0.0f);
+        if (auto* p = proc.apvts.getParameter ("stutter_tape_step" + step))
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) (1 + i % 2)));
+        if (auto* p = proc.apvts.getParameter ("stutter_pitch_step" + step))
+            p->setValueNotifyingHost (i % 3 == 0 ? 1.0f : 0.0f);
+        if (auto* p = proc.apvts.getParameter ("stutter_pitch_semitones_step" + step))
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) (-24 + (i * 7) % 49)));
+        if (auto* p = proc.apvts.getParameter ("stutter_gate_step" + step))
+            p->setValueNotifyingHost (i % 5 == 0 ? 1.0f : 0.0f);
+    }
     runPass (proc, 44100.0, 128, "Extreme stress");
 
     std::cout << "=== RESULT: " << failures << " failing checks across " << totalBlocksChecked << " blocks tested ===" << std::endl;

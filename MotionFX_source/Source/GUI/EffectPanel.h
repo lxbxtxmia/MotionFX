@@ -40,6 +40,7 @@ namespace mfx
                 chain.uiModValue[(size_t) id],
                 chain.uiInputLevel[(size_t) id],
                 chain.uiOutputLevel[(size_t) id],
+                chain.uiSignalEpoch,
                 theSpec.accent);
             addAndMakeVisible (*visualizer);
 

@@ -61,6 +61,12 @@ namespace mfx
 
             for (auto& slot : slots)
                 slot.mod.reset();
+
+            for (auto& level : uiInputLevel) level.store (0.0f, std::memory_order_relaxed);
+            for (auto& level : uiOutputLevel) level.store (0.0f, std::memory_order_relaxed);
+            for (auto& value : uiModValue) value.store (0.0f, std::memory_order_relaxed);
+            outputLevelUi.store (0.0f, std::memory_order_relaxed);
+            uiSignalEpoch.fetch_add (1, std::memory_order_relaxed);
         }
 
         void processBlock (juce::AudioBuffer<float>& buffer,
@@ -69,6 +75,8 @@ namespace mfx
             const int numSamples = buffer.getNumSamples();
             if (buffer.getNumChannels() < 2 || numSamples == 0)
                 return;
+
+            uiSignalEpoch.fetch_add (1, std::memory_order_relaxed);
 
             auto* left = buffer.getWritePointer (0);
             auto* right = buffer.getWritePointer (1);
@@ -208,6 +216,7 @@ namespace mfx
         std::array<std::atomic<float>, numEffects> uiModValue {};
         std::array<std::atomic<float>, numEffects> uiInputLevel {};
         std::array<std::atomic<float>, numEffects> uiOutputLevel {};
+        std::atomic<juce::uint64> uiSignalEpoch { 0 };
         std::atomic<float> outputLevelUi { 0.0f };
 
     private:

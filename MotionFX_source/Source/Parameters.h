@@ -34,10 +34,14 @@ namespace mfx
     inline juce::StringArray filterModeChoices() { return { "Low Pass", "High Pass", "Band Pass", "Notch", "Peak", "Comb" }; }
     inline juce::StringArray filterSlopeChoices() { return { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" }; }
 
-    inline juce::StringArray stutterActionChoices()
+    inline juce::StringArray stutterRepeatChoices()
     {
-        return { "Off", "Repeat 1/4", "Repeat 1/8", "Repeat 1/16", "Repeat 1/32",
-                 "Reverse", "Tape Stop", "Tape Up", "Pitch Up", "Pitch Down", "Gate" };
+        return { "Off", "1/4", "1/8", "1/16", "1/32" };
+    }
+
+    inline juce::StringArray stutterTapeChoices()
+    {
+        return { "Off", "Down", "Up" };
     }
 
     inline juce::String pidFor (const juce::String& prefix, const juce::String& name)
@@ -189,15 +193,44 @@ namespace mfx
             }
         }
 
-        parameters.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID ("stutter_enabled", 1), "Stutter Enabled", false));
-        parameters.push_back (std::make_unique<juce::AudioParameterInt> (juce::ParameterID ("stutter_numsteps", 1), "Stutter Steps", 1, 32, 16));
-        parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("stutter_div", 1), "Stutter Division", syncDivChoices(), 7));
-        parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("stutter_mix", 1), "Stutter Mix", juce::NormalisableRange<float> (0.0f, 100.0f), 100.0f));
+        parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID ("stutter_enabled", 1), "Stutter Enabled", false));
+        parameters.push_back (std::make_unique<juce::AudioParameterInt> (
+            juce::ParameterID ("stutter_numsteps", 1), "Stutter Steps", 1, 32, 16));
+        parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID ("stutter_div", 1), "Stutter Division", syncDivChoices(), 7));
+        parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID ("stutter_mix", 1), "Stutter Mix",
+            juce::NormalisableRange<float> (0.0f, 100.0f), 100.0f));
+        parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID ("stutter_pitch_grain_ms", 1), "Stutter Pitch Grain",
+            juce::NormalisableRange<float> (10.0f, 120.0f, 0.1f), 50.0f));
 
         for (int index = 0; index < StutterEngine::maxSteps; ++index)
+        {
+            const juce::String step (index);
             parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
-                juce::ParameterID ("stutter_step" + juce::String (index), 1),
-                "Stutter Step " + juce::String (index + 1), stutterActionChoices(), 0));
+                juce::ParameterID ("stutter_repeat_step" + step, 1),
+                "Stutter Repeat Step " + juce::String (index + 1),
+                stutterRepeatChoices(), 0));
+            parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                juce::ParameterID ("stutter_reverse_step" + step, 1),
+                "Stutter Reverse Step " + juce::String (index + 1), false));
+            parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                juce::ParameterID ("stutter_tape_step" + step, 1),
+                "Stutter Tape Step " + juce::String (index + 1),
+                stutterTapeChoices(), 0));
+            parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                juce::ParameterID ("stutter_pitch_step" + step, 1),
+                "Stutter Pitch Step " + juce::String (index + 1), false));
+            parameters.push_back (std::make_unique<juce::AudioParameterInt> (
+                juce::ParameterID ("stutter_pitch_semitones_step" + step, 1),
+                "Stutter Pitch Semitones Step " + juce::String (index + 1),
+                -24, 24, 0));
+            parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                juce::ParameterID ("stutter_gate_step" + step, 1),
+                "Stutter Gate Step " + juce::String (index + 1), false));
+        }
 
         return { parameters.begin(), parameters.end() };
     }

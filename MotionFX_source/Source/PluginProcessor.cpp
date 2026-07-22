@@ -146,10 +146,10 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
 
 void MotionFXAudioProcessor::pullParamsIntoChain (int numSamples)
 {
-    auto rawM = [this] (const char* id) -> float
+    auto rawM = [this] (const juce::String& id) -> float
     {
-        auto* v = apvts.getRawParameterValue (id);
-        return v != nullptr ? v->load() : 0.0f;
+        auto* value = apvts.getRawParameterValue (id);
+        return value != nullptr ? value->load() : 0.0f;
     };
 
     chain.inputGainDb = rawM ("master_input");
@@ -161,13 +161,27 @@ void MotionFXAudioProcessor::pullParamsIntoChain (int numSamples)
         updateSlot ((EffectId) e, effectPrefixes[e], numSamples);
 
     chain.stutterEnabled = rawM ("stutter_enabled") > 0.5f;
-    int stSteps = (int) rawM ("stutter_numsteps");
-    chain.stutter.setPattern (stSteps, toDiv ((int) rawM ("stutter_div")));
+    const int stutterSteps = (int) rawM ("stutter_numsteps");
+    chain.stutter.setPattern (stutterSteps, toDiv ((int) rawM ("stutter_div")));
     chain.stutter.setMix (rawM ("stutter_mix") / 100.0f);
-    for (int i = 0; i < stSteps; ++i)
+    chain.stutter.setPitchGrainMilliseconds (
+        rawM ("stutter_pitch_grain_ms"));
+
+    for (int step = 0; step < mfx::StutterEngine::maxSteps; ++step)
     {
-        auto* v = apvts.getRawParameterValue ("stutter_step" + juce::String (i));
-        chain.stutter.setStepAction (i, (mfx::StepAction) (v != nullptr ? (int) v->load() : 0));
+        const juce::String index (step);
+        chain.stutter.setRepeatStep (
+            step, (mfx::RepeatAction) (int) rawM ("stutter_repeat_step" + index));
+        chain.stutter.setReverseStep (
+            step, rawM ("stutter_reverse_step" + index) > 0.5f);
+        chain.stutter.setTapeStep (
+            step, (mfx::TapeAction) (int) rawM ("stutter_tape_step" + index));
+        chain.stutter.setPitchStep (
+            step,
+            rawM ("stutter_pitch_step" + index) > 0.5f,
+            (int) rawM ("stutter_pitch_semitones_step" + index));
+        chain.stutter.setGateStep (
+            step, rawM ("stutter_gate_step" + index) > 0.5f);
     }
 }
 

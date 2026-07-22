@@ -1,5 +1,15 @@
 # MotionFX changelog
 
+## 0.6.0 - Block 6
+
+- Signal visualisers now return smoothly to zero when audio processing stops instead of holding the last level.
+- Dragged effect tabs use a neutral ghost style and no longer look selected.
+- Rebuilt Stutter as five independent, stackable lanes: Repeat, Reverse, Tape, Pitch and Gate.
+- Added per-step overlapping actions through the new multi-row Stutter editor.
+- Added independent -24 to +24 semitone values for every Pitch cell, with realtime dual-grain processing and adjustable grain size.
+- Added left-drag painting and right-drag erasing for every Stutter lane; Pitch uses vertical semitone editing and click-to-zero.
+- Removed the legacy single-action Stutter step format; old Stutter patterns are intentionally not migrated.
+
 ## 0.5.0 - Block 5
 
 - Added a dedicated Filter category with Low Pass, High Pass, Band Pass, Notch, Peak and Comb modes.

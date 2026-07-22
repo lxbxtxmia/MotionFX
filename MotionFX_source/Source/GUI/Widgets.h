@@ -118,6 +118,9 @@ namespace mfx
         static juce::String inferUnitSuffix (const juce::String& paramId,
                                              juce::RangedAudioParameter* parameter)
         {
+            if (paramId.endsWith ("_pitch_grain_ms"))
+                return " ms";
+
             if (dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr)
                 return {};
 
@@ -216,13 +219,15 @@ namespace mfx
         ModVisualizer (std::atomic<float>& modulationSource,
                        std::atomic<float>& inputSource,
                        std::atomic<float>& outputSource,
+                       std::atomic<juce::uint64>& epochSource,
                        juce::Colour accentColour)
-            : modulation (modulationSource), input (inputSource),
-              output (outputSource), accent (accentColour)
+            : modulation (modulationSource), input (inputSource), output (outputSource),
+              signalEpoch (epochSource), accent (accentColour)
         {
             modulationHistory.assign (180, 0.0f);
             inputHistory.assign (180, 0.0f);
             outputHistory.assign (180, 0.0f);
+            lastEpoch = signalEpoch.load (std::memory_order_relaxed);
             startTimerHz (30);
         }
 
@@ -245,12 +250,10 @@ namespace mfx
 
             drawEnvelope (graphics, inputHistory, Palette::textDim.withAlpha (0.32f), inner, false);
             drawEnvelope (graphics, outputHistory, accent.withAlpha (0.55f), inner, true);
-
             if (modulationActive)
                 drawModulation (graphics, inner);
 
-            auto labelBounds = inner.toNearestInt();
-            labelBounds = labelBounds.removeFromTop (14);
+            auto labelBounds = inner.toNearestInt().removeFromTop (14);
             graphics.setFont (juce::Font (juce::FontOptions (10.0f)));
             graphics.setColour (Palette::textDim.withAlpha (0.75f));
             graphics.drawText ("IN", labelBounds, juce::Justification::topLeft);
@@ -269,8 +272,7 @@ namespace mfx
             if (history.size() < 2)
                 return;
 
-            juce::Path upper;
-            juce::Path lower;
+            juce::Path upper, lower;
             const float centreY = area.getCentreY();
             const float halfHeight = area.getHeight() * 0.46f;
 
@@ -279,7 +281,6 @@ namespace mfx
                 const float x = area.getX()
                     + area.getWidth() * ((float) index / (float) (history.size() - 1));
                 const float amplitude = juce::jlimit (0.0f, 1.0f, history[index]) * halfHeight;
-
                 if (index == 0)
                 {
                     upper.startNewSubPath (x, centreY - amplitude);
@@ -320,16 +321,11 @@ namespace mfx
                 const float x = area.getX()
                     + area.getWidth() * ((float) index / (float) (modulationHistory.size() - 1));
                 const float y = area.getBottom() - modulationHistory[index] * area.getHeight();
-                if (index == 0)
-                    path.startNewSubPath (x, y);
-                else
-                    path.lineTo (x, y);
+                if (index == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
             }
-
             graphics.setColour (accent.brighter (0.25f));
             graphics.strokePath (path, juce::PathStrokeType (
                 2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
             const float last = modulationHistory.back();
             graphics.fillEllipse (area.getRight() - 4.0f,
                                   area.getBottom() - last * area.getHeight() - 4.0f,
@@ -341,25 +337,53 @@ namespace mfx
             return std::sqrt (juce::jlimit (0.0f, 1.0f, level * 1.6f));
         }
 
+        static float decayLevel (float previous) noexcept
+        {
+            const float decayed = previous * 0.72f;
+            return decayed < 0.001f ? 0.0f : decayed;
+        }
+
         void timerCallback() override
         {
+            const auto epoch = signalEpoch.load (std::memory_order_relaxed);
+            if (epoch != lastEpoch)
+            {
+                lastEpoch = epoch;
+                staleTicks = 0;
+            }
+            else
+            {
+                ++staleTicks;
+            }
+
             modulationHistory.pop_front();
             inputHistory.pop_front();
             outputHistory.pop_front();
             modulationHistory.push_back (juce::jlimit (
                 0.0f, 1.0f, modulation.load (std::memory_order_relaxed)));
-            inputHistory.push_back (visualLevel (input.load (std::memory_order_relaxed)));
-            outputHistory.push_back (visualLevel (output.load (std::memory_order_relaxed)));
+
+            // Two grace ticks avoid false decay with very large host buffer sizes.
+            if (staleTicks <= 2)
+            {
+                inputHistory.push_back (visualLevel (input.load (std::memory_order_relaxed)));
+                outputHistory.push_back (visualLevel (output.load (std::memory_order_relaxed)));
+            }
+            else
+            {
+                inputHistory.push_back (decayLevel (inputHistory.back()));
+                outputHistory.push_back (decayLevel (outputHistory.back()));
+            }
             repaint();
         }
 
         std::atomic<float>& modulation;
         std::atomic<float>& input;
         std::atomic<float>& output;
+        std::atomic<juce::uint64>& signalEpoch;
         juce::Colour accent;
-        std::deque<float> modulationHistory;
-        std::deque<float> inputHistory;
-        std::deque<float> outputHistory;
+        std::deque<float> modulationHistory, inputHistory, outputHistory;
+        juce::uint64 lastEpoch = 0;
+        int staleTicks = 0;
         bool modulationActive = false;
     };
 
@@ -422,91 +446,260 @@ namespace mfx
     };
 
     //==============================================================================
-    // Click-to-cycle / drag-to-paint grid for the stutter/repeat/tape-stop tab.
-    class StepActionGrid : public juce::Component
+    // Left-click/drag paints an action; right-click/drag erases it.
+    class StepLaneGrid : public juce::Component
     {
     public:
-        StepActionGrid (juce::AudioProcessorValueTreeState& s, juce::String pfx)
-            : apvts (s), prefix (std::move (pfx)) {}
-
-        void setNumSteps (int n) { numSteps = juce::jlimit (1, StutterEngine::maxSteps, n); repaint(); }
-        void setCurrentStepProvider (std::function<int()> fn) { currentStepFn = std::move (fn); }
-
-        static juce::Colour colourForAction (int action)
+        StepLaneGrid (juce::AudioProcessorValueTreeState& state,
+                      juce::String parameterPrefix,
+                      juce::StringArray valueNames,
+                      juce::Colour laneColour,
+                      bool toggle,
+                      bool showText)
+            : apvts (state), prefix (std::move (parameterPrefix)),
+              choices (std::move (valueNames)), accent (laneColour),
+              toggleMode (toggle), showChoiceText (showText)
         {
-            switch (action)
-            {
-                case 0: return Palette::stroke; // Off
-                case 1: case 2: case 3: case 4: return Palette::teal;   // repeats
-                case 5: return Palette::purple;   // reverse
-                case 6: case 7: return Palette::orange; // tape stop/up
-                case 8: case 9: return Palette::pink;   // pitch up/down
-                case 10: return Palette::red;     // gate
-                default: return Palette::stroke;
-            }
+            setTooltip ("Left-drag to paint; right-drag to erase");
         }
 
-        void paint (juce::Graphics& g) override
+        void setNumSteps (int steps)
         {
-            auto b = getLocalBounds().toFloat();
-            float cellW = b.getWidth() / (float) numSteps;
-            int activeStep = currentStepFn ? currentStepFn() : -1;
-            auto choices = stutterActionChoices();
+            const int newCount = juce::jlimit (1, StutterEngine::maxSteps, steps);
+            if (newCount != numSteps) { numSteps = newCount; repaint(); }
+        }
+        void setCurrentStepProvider (std::function<int()> provider) { currentStepProvider = std::move (provider); }
 
-            for (int i = 0; i < numSteps; ++i)
+        void paint (juce::Graphics& graphics) override
+        {
+            const auto bounds = getLocalBounds().toFloat();
+            const float cellWidth = bounds.getWidth() / (float) numSteps;
+            const int activeStep = currentStepProvider ? currentStepProvider() : -1;
+            for (int step = 0; step < numSteps; ++step)
             {
-                auto* v = apvts.getRawParameterValue (prefix + juce::String (i));
-                int action = v != nullptr ? (int) v->load() : 0;
-
-                auto cell = juce::Rectangle<float> (b.getX() + i * cellW, b.getY(), cellW, b.getHeight()).reduced (1.5f);
-                g.setColour (i == activeStep ? Palette::panelHi.brighter (0.2f) : Palette::bg1);
-                g.fillRoundedRectangle (cell, 3.0f);
-
-                if (action != 0)
+                const int value = readValue (step);
+                const bool enabled = value != 0;
+                auto cell = juce::Rectangle<float> (bounds.getX() + step * cellWidth,
+                    bounds.getY(), cellWidth, bounds.getHeight()).reduced (1.5f);
+                graphics.setColour (step == activeStep ? Palette::panelHi : Palette::bg1);
+                graphics.fillRoundedRectangle (cell, 3.0f);
+                if (enabled)
                 {
-                    auto inner = cell.reduced (cell.getWidth() * 0.12f, cell.getHeight() * 0.12f);
-                    g.setColour (colourForAction (action));
-                    g.fillRoundedRectangle (inner, 2.0f);
+                    const float strength = choices.size() > 2
+                        ? juce::jmap ((float) value, 1.0f, (float) juce::jmax (1, choices.size() - 1), 0.55f, 0.95f)
+                        : 0.82f;
+                    graphics.setColour (accent.withAlpha (strength));
+                    graphics.fillRoundedRectangle (cell.reduced (2.0f), 2.0f);
                 }
-                g.setColour (Palette::stroke);
-                g.drawRoundedRectangle (cell, 3.0f, 1.0f);
-
-                if (cellW > 30.0f && action != 0 && action < choices.size())
+                graphics.setColour (step == activeStep ? accent.withAlpha (0.9f) : Palette::stroke);
+                graphics.drawRoundedRectangle (cell, 3.0f, step == activeStep ? 1.5f : 1.0f);
+                if (enabled && showChoiceText && cellWidth > 28.0f && value < choices.size())
                 {
-                    g.setColour (Palette::bg0);
-                    g.setFont (juce::Font (juce::FontOptions (juce::jmin (10.0f, cell.getHeight() * 0.22f))));
-                    g.drawFittedText (choices[action], cell.toNearestInt().reduced (2), juce::Justification::centred, 2);
+                    graphics.setColour (Palette::bg0);
+                    graphics.setFont (juce::Font (juce::FontOptions (juce::jmin (10.0f, cell.getHeight() * 0.24f))));
+                    graphics.drawFittedText (choices[value], cell.toNearestInt().reduced (2), juce::Justification::centred, 1);
                 }
             }
         }
 
-        void mouseDown (const juce::MouseEvent& e) override { cycleAt (e, true); }
-        void mouseDrag (const juce::MouseEvent& e) override { cycleAt (e, false); }
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            lastPaintedStep = -1;
+            const int step = stepFromX (event.position.x);
+            if (event.mods.isRightButtonDown())
+                paintValue = 0;
+            else
+            {
+                const int current = readValue (step);
+                if (toggleMode) paintValue = 1;
+                else if (current == 0) paintValue = lastNonZeroValue;
+                else
+                {
+                    paintValue = current + 1;
+                    if (paintValue >= choices.size()) paintValue = 1;
+                    lastNonZeroValue = paintValue;
+                }
+            }
+            paintStep (step);
+        }
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            if (event.mods.isRightButtonDown()) paintValue = 0;
+            paintStep (stepFromX (event.position.x));
+        }
+        void mouseUp (const juce::MouseEvent&) override { lastPaintedStep = -1; }
 
     private:
-        void cycleAt (const juce::MouseEvent& e, bool isNewClick)
+        int stepFromX (float x) const noexcept
         {
-            float cellW = (float) getWidth() / (float) numSteps;
-            int idx = juce::jlimit (0, numSteps - 1, (int) (e.position.x / cellW));
-            if (! isNewClick && idx == lastPaintedIdx) return;
-            lastPaintedIdx = idx;
-
-            auto choices = stutterActionChoices();
-            if (auto* p = apvts.getParameter (prefix + juce::String (idx)))
-            {
-                int current = (int) (p->getValue() * (choices.size() - 1) + 0.5f);
-                int next = isNewClick ? (current + 1) % choices.size() : paintAction;
-                if (isNewClick) paintAction = next;
-                p->setValueNotifyingHost (p->convertTo0to1 ((float) next));
-            }
+            return juce::jlimit (0, numSteps - 1,
+                (int) (x / ((float) getWidth() / (float) numSteps)));
+        }
+        int readValue (int step) const
+        {
+            if (auto* value = apvts.getRawParameterValue (prefix + juce::String (step)))
+                return juce::jmax (0, (int) std::round (value->load()));
+            return 0;
+        }
+        void paintStep (int step)
+        {
+            if (step == lastPaintedStep) return;
+            lastPaintedStep = step;
+            if (auto* parameter = apvts.getParameter (prefix + juce::String (step)))
+                parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) paintValue));
             repaint();
         }
 
         juce::AudioProcessorValueTreeState& apvts;
         juce::String prefix;
-        int numSteps = 16;
-        int lastPaintedIdx = -1;
-        int paintAction = 0;
-        std::function<int()> currentStepFn;
+        juce::StringArray choices;
+        juce::Colour accent;
+        bool toggleMode = false, showChoiceText = false;
+        int numSteps = 16, lastPaintedStep = -1, paintValue = 1, lastNonZeroValue = 1;
+        std::function<int()> currentStepProvider;
     };
+
+    //==============================================================================
+    class PitchStepGrid : public juce::Component
+    {
+    public:
+        PitchStepGrid (juce::AudioProcessorValueTreeState& state,
+                       juce::String activeParameterPrefix,
+                       juce::String semitoneParameterPrefix,
+                       juce::Colour laneColour)
+            : apvts (state), activePrefix (std::move (activeParameterPrefix)),
+              semitonePrefix (std::move (semitoneParameterPrefix)), accent (laneColour)
+        {
+            setTooltip ("Left click = 0 st; drag up/down by semitone; right-drag erase");
+        }
+
+        void setNumSteps (int steps)
+        {
+            const int newCount = juce::jlimit (1, StutterEngine::maxSteps, steps);
+            if (newCount != numSteps) { numSteps = newCount; repaint(); }
+        }
+        void setCurrentStepProvider (std::function<int()> provider) { currentStepProvider = std::move (provider); }
+
+        static int semitonesFromDrag (int startSemitones, float verticalDelta, float pixelsPerSemitone) noexcept
+        {
+            return juce::jlimit (-24, 24, startSemitones
+                + juce::roundToInt (verticalDelta / juce::jmax (1.0f, pixelsPerSemitone)));
+        }
+
+        void paint (juce::Graphics& graphics) override
+        {
+            const auto bounds = getLocalBounds().toFloat();
+            const float cellWidth = bounds.getWidth() / (float) numSteps;
+            const int currentStep = currentStepProvider ? currentStepProvider() : -1;
+            for (int step = 0; step < numSteps; ++step)
+            {
+                const bool active = readActive (step);
+                const int semitones = readSemitones (step);
+                auto cell = juce::Rectangle<float> (bounds.getX() + step * cellWidth,
+                    bounds.getY(), cellWidth, bounds.getHeight()).reduced (1.5f);
+                graphics.setColour (step == currentStep ? Palette::panelHi : Palette::bg1);
+                graphics.fillRoundedRectangle (cell, 3.0f);
+                const float centreY = cell.getCentreY();
+                graphics.setColour (Palette::stroke.withAlpha (0.7f));
+                graphics.drawHorizontalLine ((int) centreY, cell.getX() + 2.0f, cell.getRight() - 2.0f);
+                if (active)
+                {
+                    const float valueY = juce::jmap ((float) semitones, -24.0f, 24.0f,
+                                                    cell.getBottom() - 3.0f, cell.getY() + 3.0f);
+                    auto bar = juce::Rectangle<float> (cell.getX() + 3.0f,
+                        juce::jmin (centreY, valueY), cell.getWidth() - 6.0f,
+                        juce::jmax (3.0f, std::abs (valueY - centreY)));
+                    graphics.setColour (accent.withAlpha (0.88f));
+                    graphics.fillRoundedRectangle (bar, 2.0f);
+                    if (cellWidth > 24.0f)
+                    {
+                        const juce::String valueText = juce::String (semitones > 0 ? "+" : "") + juce::String (semitones);
+                        graphics.setColour (Palette::text);
+                        graphics.setFont (juce::Font (juce::FontOptions (juce::jmin (10.0f, cell.getHeight() * 0.23f))).withStyle (juce::Font::bold));
+                        graphics.drawFittedText (valueText, cell.toNearestInt().reduced (1), juce::Justification::centred, 1);
+                    }
+                }
+                graphics.setColour (step == currentStep ? accent.withAlpha (0.95f) : Palette::stroke);
+                graphics.drawRoundedRectangle (cell, 3.0f, step == currentStep ? 1.5f : 1.0f);
+            }
+        }
+
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            erasing = event.mods.isRightButtonDown();
+            pressStep = stepFromX (event.position.x);
+            pressY = event.position.y;
+            dragged = false;
+            lastEditedStep = -1;
+            if (erasing) { eraseStep (pressStep); return; }
+            dragStartSemitones = readActive (pressStep) ? readSemitones (pressStep) : 0;
+            setStep (pressStep, true, dragStartSemitones);
+            lastEditedStep = pressStep;
+        }
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            const int step = stepFromX (event.position.x);
+            if (event.mods.isRightButtonDown() || erasing)
+            {
+                erasing = true;
+                if (step != lastEditedStep) eraseStep (step);
+                return;
+            }
+            if (event.getDistanceFromDragStart() > 2) dragged = true;
+            const int semitones = semitonesFromDrag (dragStartSemitones,
+                pressY - event.position.y, juce::jmax (2.0f, (float) getHeight() / 48.0f));
+            setStep (step, true, semitones);
+            lastEditedStep = step;
+        }
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            if (! erasing && ! dragged && pressStep >= 0) setStep (pressStep, true, 0);
+            erasing = false; dragged = false; pressStep = -1; lastEditedStep = -1;
+        }
+
+    private:
+        int stepFromX (float x) const noexcept
+        {
+            return juce::jlimit (0, numSteps - 1,
+                (int) (x / ((float) getWidth() / (float) numSteps)));
+        }
+        bool readActive (int step) const
+        {
+            if (auto* value = apvts.getRawParameterValue (activePrefix + juce::String (step)))
+                return value->load() > 0.5f;
+            return false;
+        }
+        int readSemitones (int step) const
+        {
+            if (auto* value = apvts.getRawParameterValue (semitonePrefix + juce::String (step)))
+                return juce::jlimit (-24, 24, (int) std::round (value->load()));
+            return 0;
+        }
+        void eraseStep (int step)
+        {
+            setParameter (activePrefix + juce::String (step), 0.0f);
+            setParameter (semitonePrefix + juce::String (step), 0.0f);
+            lastEditedStep = step; repaint();
+        }
+        void setStep (int step, bool active, int semitones)
+        {
+            setParameter (activePrefix + juce::String (step), active ? 1.0f : 0.0f);
+            setParameter (semitonePrefix + juce::String (step), (float) juce::jlimit (-24, 24, semitones));
+            repaint();
+        }
+        void setParameter (const juce::String& parameterId, float value)
+        {
+            if (auto* parameter = apvts.getParameter (parameterId))
+                parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+        }
+
+        juce::AudioProcessorValueTreeState& apvts;
+        juce::String activePrefix, semitonePrefix;
+        juce::Colour accent;
+        int numSteps = 16, pressStep = -1, lastEditedStep = -1, dragStartSemitones = 0;
+        float pressY = 0.0f;
+        bool erasing = false, dragged = false;
+        std::function<int()> currentStepProvider;
+    };
+
 }

@@ -61,10 +61,9 @@ namespace mfx
                 const auto cell = juce::Rectangle<float> (
                     dragMouseX - tabWidth * 0.5f, bounds.getY(),
                     tabWidth, bounds.getHeight()).reduced (3.0f);
-                const juce::Colour accent = Palette::effectColour ((int) draggedEffect);
 
-                // Drag outline only: this must not look like a second selected tab.
-                drawTab (graphics, cell, accent,
+                // Deliberately neutral: dragging must never look like selecting.
+                drawTab (graphics, cell, Palette::stroke,
                          effectDisplayNames[(int) draggedEffect], false, true);
             }
         }
@@ -110,7 +109,6 @@ namespace mfx
                 if (onReorder)
                     onReorder (order);
             }
-
             repaint();
         }
 
@@ -118,38 +116,40 @@ namespace mfx
         {
             if (! movedEnough && onSelect)
                 onSelect (dragStartSlot);
-
             dragging = false;
             movedEnough = false;
             repaint();
         }
 
     private:
-        void drawTab (juce::Graphics& graphics,
-                      juce::Rectangle<float> cell,
-                      juce::Colour accent,
-                      const juce::String& label,
-                      bool selected,
-                      bool floating)
+        void drawTab (juce::Graphics& graphics, juce::Rectangle<float> cell,
+                      juce::Colour accent, const juce::String& label,
+                      bool selected, bool floating)
         {
-            graphics.setColour (selected ? Palette::panelHi
-                                         : floating ? Palette::panelHi.withAlpha (0.88f)
-                                                    : Palette::panel);
-            graphics.fillRoundedRectangle (cell, 6.0f);
-
-            graphics.setColour (floating ? accent.withAlpha (0.85f)
-                                         : selected ? accent : Palette::stroke);
-            graphics.drawRoundedRectangle (cell, 6.0f,
-                                            selected || floating ? 2.0f : 1.0f);
-
-            if (selected)
+            if (floating)
             {
-                graphics.setColour (accent);
-                graphics.fillRoundedRectangle (cell.getX(), cell.getBottom() - 3.0f,
-                                                cell.getWidth(), 3.0f, 1.5f);
+                graphics.setColour (Palette::panel.withAlpha (0.72f));
+                graphics.fillRoundedRectangle (cell, 6.0f);
+                graphics.setColour (Palette::stroke.withAlpha (0.85f));
+                graphics.drawRoundedRectangle (cell, 6.0f, 1.0f);
+                graphics.setColour (Palette::textDim.withAlpha (0.9f));
+            }
+            else
+            {
+                graphics.setColour (selected ? Palette::panelHi : Palette::panel);
+                graphics.fillRoundedRectangle (cell, 6.0f);
+                graphics.setColour (selected ? accent : Palette::stroke);
+                graphics.drawRoundedRectangle (cell, 6.0f, selected ? 2.0f : 1.0f);
+
+                if (selected)
+                {
+                    graphics.setColour (accent);
+                    graphics.fillRoundedRectangle (cell.getX(), cell.getBottom() - 3.0f,
+                                                    cell.getWidth(), 3.0f, 1.5f);
+                }
+                graphics.setColour (selected ? Palette::text : Palette::textDim);
             }
 
-            graphics.setColour (selected || floating ? Palette::text : Palette::textDim);
             graphics.setFont (juce::Font (juce::FontOptions (
                 juce::jmin (14.0f, cell.getHeight() * 0.32f))).withStyle (juce::Font::bold));
             graphics.drawFittedText (label, cell.toNearestInt(),
@@ -160,7 +160,6 @@ namespace mfx
             EffectId::Drive, EffectId::Retro, EffectId::Filter, EffectId::Pan,
             EffectId::Width, EffectId::Volume, EffectId::Space
         };
-
         int selectedSlot = 0;
         int dragStartSlot = 0, dragCurrentSlot = 0;
         float dragStartX = 0.0f, dragMouseX = 0.0f;

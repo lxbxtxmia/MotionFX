@@ -281,7 +281,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.5.0 - Build 5
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.6.0 - Build 6
 
 Multi-effect modulation VST3.
 
@@ -297,7 +297,15 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.5.0 - Build 5
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.6.0 - Build 6
+- Signal visualisers decay to zero when audio processing stops.
+- Dragged tabs use a neutral ghost style.
+- Rebuilt Stutter as independent Repeat, Reverse, Tape, Pitch and Gate lanes.
+- Added overlapping per-step Stutter processing.
+- Added independent per-step realtime granular pitch shifting from -24 to +24 semitones.
+- Added left-drag painting, right-drag erasing and click-to-zero Pitch editing.
+
+0.5.0 - Build 5
 - Added the Filter category with six modes and selectable slopes.
 - Added live input/output signal traces behind modulation displays.
 - Changed knob double-click behaviour and fixed two-decimal displays.
