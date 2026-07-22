@@ -3,6 +3,7 @@
 #include <array>
 #include <vector>
 #include <cmath>
+#include <atomic>
 
 namespace mfx
 {
@@ -453,11 +454,22 @@ namespace mfx
             tape.reset();
             pitch.reset();
             lastStepIndex = -1;
+            currentStepForUi.store (-1, std::memory_order_relaxed);
             sampleCounterInStep = 0;
             currentStepLengthSamples = 1;
         }
 
-        void setEnabled (bool shouldBeEnabled) noexcept { enabled = shouldBeEnabled; }
+        void setEnabled (bool shouldBeEnabled) noexcept
+        {
+            if (enabled && ! shouldBeEnabled)
+            {
+                lastStepIndex = -1;
+                sampleCounterInStep = 0;
+                currentStepForUi.store (-1, std::memory_order_relaxed);
+            }
+
+            enabled = shouldBeEnabled;
+        }
         void setPattern (int steps, SyncDiv stepDivision) noexcept
         {
             numSteps = juce::jlimit (1, maxSteps, steps);
@@ -510,7 +522,10 @@ namespace mfx
                 gatePattern[(size_t) index] = active;
         }
 
-        int getCurrentStepIndex() const noexcept { return lastStepIndex; }
+        int getCurrentStepIndex() const noexcept
+        {
+            return currentStepForUi.load (std::memory_order_relaxed);
+        }
         int getNumSteps() const noexcept { return numSteps; }
         SyncDiv getDivision() const noexcept { return division; }
 
@@ -555,6 +570,7 @@ namespace mfx
                 if (stepIndex != lastStepIndex)
                 {
                     lastStepIndex = stepIndex;
+                    currentStepForUi.store (stepIndex, std::memory_order_relaxed);
                     sampleCounterInStep = 0;
                     currentStepLengthSamples = stepSamples;
                     repeat.beginStep (repeatPattern[(size_t) stepIndex], transport.bpm);
@@ -636,6 +652,7 @@ namespace mfx
         StutterGateProcessor gate;
 
         int lastStepIndex = -1;
+        std::atomic<int> currentStepForUi { -1 };
         int sampleCounterInStep = 0;
         int currentStepLengthSamples = 1;
     };

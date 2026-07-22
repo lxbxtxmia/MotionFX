@@ -3,6 +3,7 @@
 #include "Parameters.h"
 #include "DSP/EffectChain.h"
 #include "PresetManager.h"
+#include "StateHistory.h"
 
 class MotionFXAudioProcessor : public juce::AudioProcessor
 {
@@ -32,16 +33,28 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    juce::AudioProcessorValueTreeState apvts { *this, nullptr, "PARAMS", mfx::createParameterLayout() };
+    juce::AudioProcessorValueTreeState apvts {
+        *this, nullptr, "PARAMS", mfx::createParameterLayout()
+    };
     mfx::EffectChain chain;
     mfx::PresetManager presetManager;
+    std::unique_ptr<mfx::StateHistory> stateHistory;
 
-    std::array<mfx::EffectId, mfx::numEffects> getOrder() const { return chain.getOrderSafe(); }
-    void setOrder (std::array<mfx::EffectId, mfx::numEffects> o) { chain.setOrderSafe (o); }
+    std::array<mfx::EffectId, mfx::numEffects> getOrder() const
+    {
+        return chain.getOrderSafe();
+    }
+
+    void setOrder (std::array<mfx::EffectId, mfx::numEffects> order)
+    {
+        chain.setOrderSafe (order);
+    }
 
 private:
     void pullParamsIntoChain (int numSamples);
-    void updateSlot (mfx::EffectId id, const juce::String& prefix, int numSamples);
+    void updateSlot (mfx::EffectId id,
+                     const juce::String& prefix,
+                     int numSamples);
 
     mfx::TransportInfo currentTransport;
     double fallbackPpq = 0.0;

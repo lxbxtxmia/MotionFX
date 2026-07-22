@@ -292,6 +292,119 @@ int main()
         }
     }
 
+    // Block 7 resonance budget.
+    for (int stages = 1; stages <= 4; ++stages)
+    {
+        const float q = mfx::FilterEffect::resonanceQForStages (1.0f, stages);
+        const float qPeak = q / std::sqrt (
+            1.0f - 1.0f / (4.0f * q * q));
+        const float qBoostDb =
+            20.0f * (float) stages * std::log10 (qPeak);
+        const float peakBoostDb =
+            mfx::FilterEffect::peakGainDbPerStage (1.0f, stages)
+            * (float) stages;
+
+        if (qBoostDb > 12.001f || peakBoostDb > 12.001f)
+        {
+            std::cout << "  [FAIL] Filter resonance exceeds 12 dB at "
+                      << stages << " stage(s)" << std::endl;
+            ++failures;
+        }
+    }
+
+    // Branching Undo/Redo retains the old redo branch.
+    {
+        MotionFXAudioProcessor historyProcessor;
+        auto* input = historyProcessor.apvts.getParameter ("master_input");
+        auto* output = historyProcessor.apvts.getParameter ("master_output");
+
+        if (historyProcessor.stateHistory == nullptr
+            || input == nullptr || output == nullptr)
+        {
+            std::cout << "  [FAIL] State history was not initialised"
+                      << std::endl;
+            ++failures;
+        }
+        else
+        {
+            input->setValueNotifyingHost (input->convertTo0to1 (6.0f));
+            historyProcessor.stateHistory->flushPendingNow ("Input edit");
+
+            historyProcessor.stateHistory->undo();
+            const float undoneInput = historyProcessor.apvts
+                .getRawParameterValue ("master_input")->load();
+
+            historyProcessor.stateHistory->redo();
+            const float redoneInput = historyProcessor.apvts
+                .getRawParameterValue ("master_input")->load();
+
+            historyProcessor.stateHistory->undo();
+            output->setValueNotifyingHost (output->convertTo0to1 (3.0f));
+            historyProcessor.stateHistory->flushPendingNow ("Output branch");
+
+            if (std::abs (undoneInput) > 0.01f
+                || std::abs (redoneInput - 6.0f) > 0.01f
+                || historyProcessor.stateHistory->getBranchCountAt (0) < 2)
+            {
+                std::cout << "  [FAIL] Branching Undo/Redo history is incorrect"
+                          << std::endl;
+                ++failures;
+            }
+        }
+    }
+
+    // Hidden preset creator/version metadata and newer-version rejection.
+    {
+        const auto testDirectory =
+            juce::File::getSpecialLocation (juce::File::tempDirectory)
+                .getChildFile ("MotionFX_Block7_Preset_Test");
+
+        testDirectory.deleteRecursively();
+        testDirectory.createDirectory();
+        proc.presetManager.setPresetDirectory (testDirectory);
+
+        const bool saved = proc.presetManager.saveUserPreset (
+            "Metadata Test", {}, "Unit Tester");
+        const auto presetFile = testDirectory.getChildFile (
+            "Metadata Test.mfxpreset");
+        auto xml = juce::XmlDocument::parse (presetFile);
+
+        const auto* metadata = xml != nullptr
+            ? xml->getChildByName ("FILE_META")
+            : nullptr;
+
+        if (! saved || metadata == nullptr
+            || metadata->getStringAttribute ("creator") != "Unit Tester"
+            || metadata->getStringAttribute ("createdWithVersion") != "0.7.0")
+        {
+            std::cout << "  [FAIL] Preset creator/version metadata is missing"
+                      << std::endl;
+            ++failures;
+        }
+        else
+        {
+            auto tooNewText = presetFile.loadFileAsString();
+            tooNewText = tooNewText.replace (
+                "createdWithVersion=\"0.7.0\"",
+                "createdWithVersion=\"99.0.0\"");
+            presetFile.replaceWithText (tooNewText);
+            proc.presetManager.refreshUserPresetList();
+
+            if (proc.presetManager.loadUserPresetByPath (
+                    "Metadata Test.mfxpreset")
+                || proc.presetManager.takeLastError().isEmpty())
+            {
+                std::cout << "  [FAIL] Newer preset version was not rejected"
+                          << std::endl;
+                ++failures;
+            }
+        }
+
+        proc.presetManager.setPresetDirectory (
+            mfx::PresetManager::getDefaultPresetDirectory());
+        testDirectory.deleteRecursively();
+    }
+
     proc.presetManager.loadInitPreset();
 
     // 1) default state, a few sample rates / block sizes

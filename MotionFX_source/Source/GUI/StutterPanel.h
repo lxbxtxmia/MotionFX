@@ -10,42 +10,66 @@ namespace mfx
                       EffectChain& effectChain)
             : apvts (state), chain (effectChain)
         {
-            enableToggle = std::make_unique<LabeledToggle> (apvts, "stutter_enabled", "ON");
-            numStepsKnob = std::make_unique<LabeledKnob> (apvts, "stutter_numsteps", "STEPS", Palette::pink);
-            numStepsKnob->slider.setSliderStyle (juce::Slider::LinearHorizontal);
-            divisionCombo = std::make_unique<LabeledCombo> (apvts, "stutter_div", "STEP RATE");
-            mixKnob = std::make_unique<LabeledKnob> (apvts, "stutter_mix", "MIX", Palette::pink);
-            grainKnob = std::make_unique<LabeledKnob> (apvts, "stutter_pitch_grain_ms", "PITCH GRAIN", Palette::pink);
+            enableToggle = std::make_unique<LabeledToggle> (
+                apvts, "stutter_enabled", "ON");
+            numStepsKnob = std::make_unique<LabeledKnob> (
+                apvts, "stutter_numsteps", "STEPS", Palette::pink);
+            numStepsKnob->slider.setSliderStyle (
+                juce::Slider::LinearHorizontal);
+            divisionCombo = std::make_unique<LabeledCombo> (
+                apvts, "stutter_div", "STEP RATE");
+            mixKnob = std::make_unique<LabeledKnob> (
+                apvts, "stutter_mix", "MIX", Palette::pink);
+            grainKnob = std::make_unique<LabeledKnob> (
+                apvts, "stutter_pitch_grain_ms", "PITCH GRAIN", Palette::pink);
 
-            for (auto* component : { (juce::Component*) enableToggle.get(),
-                                     (juce::Component*) numStepsKnob.get(),
-                                     (juce::Component*) divisionCombo.get(),
-                                     (juce::Component*) mixKnob.get(),
-                                     (juce::Component*) grainKnob.get() })
+            for (auto* component : {
+                     (juce::Component*) enableToggle.get(),
+                     (juce::Component*) numStepsKnob.get(),
+                     (juce::Component*) divisionCombo.get(),
+                     (juce::Component*) mixKnob.get(),
+                     (juce::Component*) grainKnob.get()
+                 })
+            {
                 addAndMakeVisible (component);
+            }
 
             repeatGrid = std::make_unique<StepLaneGrid> (
                 apvts, "stutter_repeat_step",
                 juce::StringArray { "Off", "1/4", "1/8", "1/16", "1/32" },
                 Palette::teal, false, true);
             reverseGrid = std::make_unique<StepLaneGrid> (
-                apvts, "stutter_reverse_step", juce::StringArray { "Off", "On" },
+                apvts, "stutter_reverse_step",
+                juce::StringArray { "Off", "On" },
                 Palette::purple, true, false);
             tapeGrid = std::make_unique<StepLaneGrid> (
-                apvts, "stutter_tape_step", juce::StringArray { "Off", "Down", "Up" },
+                apvts, "stutter_tape_step",
+                juce::StringArray { "Off", "Down", "Up" },
                 Palette::orange, false, true);
             pitchGrid = std::make_unique<PitchStepGrid> (
-                apvts, "stutter_pitch_step", "stutter_pitch_semitones_step", Palette::pink);
+                apvts, "stutter_pitch_step",
+                "stutter_pitch_semitones_step", Palette::pink);
             gateGrid = std::make_unique<StepLaneGrid> (
-                apvts, "stutter_gate_step", juce::StringArray { "Off", "On" },
+                apvts, "stutter_gate_step",
+                juce::StringArray { "Off", "On" },
                 Palette::red, true, false);
 
-            for (auto* grid : { repeatGrid.get(), reverseGrid.get(), tapeGrid.get(), gateGrid.get() })
+            for (auto* grid : {
+                     repeatGrid.get(), reverseGrid.get(),
+                     tapeGrid.get(), gateGrid.get()
+                 })
             {
-                grid->setCurrentStepProvider ([this] { return chain.stutter.getCurrentStepIndex(); });
+                grid->setCurrentStepProvider ([this]
+                {
+                    return chain.stutter.getCurrentStepIndex();
+                });
                 addAndMakeVisible (grid);
             }
-            pitchGrid->setCurrentStepProvider ([this] { return chain.stutter.getCurrentStepIndex(); });
+
+            pitchGrid->setCurrentStepProvider ([this]
+            {
+                return chain.stutter.getCurrentStepIndex();
+            });
             addAndMakeVisible (*pitchGrid);
 
             configureLabel (repeatLabel, "REPEAT", Palette::teal);
@@ -55,64 +79,90 @@ namespace mfx
             configureLabel (gateLabel, "GATE", Palette::red);
 
             interactionHint.setText (
-                "L-drag paint  |  R-drag erase  |  Pitch: drag up/down, click = 0 st",
+                "L-drag: paint   |   R-drag: erase   |   Pitch: vertical = semitones, click = 0",
                 juce::dontSendNotification);
-            interactionHint.setJustificationType (juce::Justification::centredLeft);
-            interactionHint.setColour (juce::Label::textColourId, Palette::textDim);
-            interactionHint.setFont (juce::Font (juce::FontOptions (11.5f)));
+            interactionHint.setJustificationType (
+                juce::Justification::centredLeft);
+            interactionHint.setColour (
+                juce::Label::textColourId, Palette::textDim);
+            interactionHint.setFont (
+                juce::Font (juce::FontOptions (10.5f)));
             addAndMakeVisible (interactionHint);
 
             clearButton.setTooltip ("Clear every Stutter lane");
-            clearButton.onClick = [this] { clearAllLanes(); };
+            clearButton.onClick = [this]
+            {
+                clearAllLanes();
+            };
             addAndMakeVisible (clearButton);
-            startTimerHz (12);
+
+            startTimerHz (30);
         }
 
         void resized() override
         {
             auto bounds = getLocalBounds().reduced (14);
-            auto controls = bounds.removeFromTop (100);
-            enableToggle->setBounds (controls.removeFromLeft (68).reduced (0, 13));
-            controls.removeFromLeft (10);
-            numStepsKnob->setBounds (controls.removeFromLeft (160));
-            controls.removeFromLeft (10);
-            divisionCombo->setBounds (controls.removeFromLeft (160).removeFromTop (62));
-            controls.removeFromLeft (10);
-            mixKnob->setBounds (controls.removeFromLeft (110));
-            controls.removeFromLeft (10);
-            grainKnob->setBounds (controls.removeFromLeft (126));
-            controls.removeFromLeft (12);
-            clearButton.setBounds (controls.removeFromLeft (78).reduced (0, 30));
+            auto controls = bounds.removeFromTop (94);
 
-            interactionHint.setBounds (bounds.removeFromTop (22));
+            enableToggle->setBounds (
+                controls.removeFromLeft (68).reduced (0, 12));
+            controls.removeFromLeft (10);
+            numStepsKnob->setBounds (controls.removeFromLeft (155));
+            controls.removeFromLeft (10);
+            divisionCombo->setBounds (
+                controls.removeFromLeft (156).removeFromTop (60));
+            controls.removeFromLeft (10);
+            mixKnob->setBounds (controls.removeFromLeft (106));
+            controls.removeFromLeft (10);
+            grainKnob->setBounds (controls.removeFromLeft (122));
+            controls.removeFromLeft (12);
+            clearButton.setBounds (
+                controls.removeFromLeft (76).reduced (0, 28));
+
+            interactionHint.setBounds (bounds.removeFromTop (20));
             bounds.removeFromTop (5);
-            const int gap = 6;
-            const int rowHeight = juce::jmax (42, (bounds.getHeight() - gap * 4) / 5);
-            layoutLane (repeatLabel, *repeatGrid, bounds.removeFromTop (rowHeight));
+
+            constexpr int gap = 5;
+            const int rowHeight = juce::jmax (
+                40, (bounds.getHeight() - gap * 4) / 5);
+
+            layoutLane (repeatLabel, *repeatGrid,
+                        bounds.removeFromTop (rowHeight));
             bounds.removeFromTop (gap);
-            layoutLane (reverseLabel, *reverseGrid, bounds.removeFromTop (rowHeight));
+            layoutLane (reverseLabel, *reverseGrid,
+                        bounds.removeFromTop (rowHeight));
             bounds.removeFromTop (gap);
-            layoutLane (tapeLabel, *tapeGrid, bounds.removeFromTop (rowHeight));
+            layoutLane (tapeLabel, *tapeGrid,
+                        bounds.removeFromTop (rowHeight));
             bounds.removeFromTop (gap);
-            layoutLane (pitchLabel, *pitchGrid, bounds.removeFromTop (rowHeight));
+            layoutLane (pitchLabel, *pitchGrid,
+                        bounds.removeFromTop (rowHeight));
             bounds.removeFromTop (gap);
             layoutLane (gateLabel, *gateGrid, bounds);
         }
 
     private:
-        void configureLabel (juce::Label& label, const juce::String& text, juce::Colour colour)
+        void configureLabel (juce::Label& label,
+                             const juce::String& text,
+                             juce::Colour colour)
         {
             label.setText (text, juce::dontSendNotification);
-            label.setJustificationType (juce::Justification::centredLeft);
+            label.setJustificationType (
+                juce::Justification::centredLeft);
             label.setColour (juce::Label::textColourId, colour);
-            label.setFont (juce::Font (juce::FontOptions (12.0f)).withStyle (juce::Font::bold));
+            label.setFont (
+                juce::Font (juce::FontOptions (10.5f))
+                    .withStyle (juce::Font::bold));
+            label.setMinimumHorizontalScale (0.72f);
             addAndMakeVisible (label);
         }
 
         template <typename GridType>
-        static void layoutLane (juce::Label& label, GridType& grid, juce::Rectangle<int> row)
+        static void layoutLane (juce::Label& label,
+                                GridType& grid,
+                                juce::Rectangle<int> row)
         {
-            label.setBounds (row.removeFromLeft (82));
+            label.setBounds (row.removeFromLeft (94));
             row.removeFromLeft (6);
             grid.setBounds (row);
         }
@@ -126,23 +176,47 @@ namespace mfx
                 setParameter ("stutter_reverse_step" + index, 0.0f);
                 setParameter ("stutter_tape_step" + index, 0.0f);
                 setParameter ("stutter_pitch_step" + index, 0.0f);
-                setParameter ("stutter_pitch_semitones_step" + index, 0.0f);
+                setParameter (
+                    "stutter_pitch_semitones_step" + index, 0.0f);
                 setParameter ("stutter_gate_step" + index, 0.0f);
             }
+
+            refreshGrids();
         }
 
         void setParameter (const juce::String& parameterId, float value)
         {
             if (auto* parameter = apvts.getParameter (parameterId))
-                parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+            {
+                parameter->setValueNotifyingHost (
+                    parameter->convertTo0to1 (value));
+            }
+        }
+
+        void refreshGrids()
+        {
+            repeatGrid->repaint();
+            reverseGrid->repaint();
+            tapeGrid->repaint();
+            pitchGrid->repaint();
+            gateGrid->repaint();
         }
 
         void timerCallback() override
         {
-            const int steps = (int) apvts.getRawParameterValue ("stutter_numsteps")->load();
-            for (auto* grid : { repeatGrid.get(), reverseGrid.get(), tapeGrid.get(), gateGrid.get() })
+            const int steps = (int) apvts.getRawParameterValue (
+                "stutter_numsteps")->load();
+
+            for (auto* grid : {
+                     repeatGrid.get(), reverseGrid.get(),
+                     tapeGrid.get(), gateGrid.get()
+                 })
+            {
                 grid->setNumSteps (steps);
+            }
+
             pitchGrid->setNumSteps (steps);
+            refreshGrids();
         }
 
         juce::AudioProcessorValueTreeState& apvts;
@@ -152,7 +226,8 @@ namespace mfx
         std::unique_ptr<LabeledCombo> divisionCombo;
         std::unique_ptr<StepLaneGrid> repeatGrid, reverseGrid, tapeGrid, gateGrid;
         std::unique_ptr<PitchStepGrid> pitchGrid;
-        juce::Label repeatLabel, reverseLabel, tapeLabel, pitchLabel, gateLabel, interactionHint;
+        juce::Label repeatLabel, reverseLabel, tapeLabel,
+                    pitchLabel, gateLabel, interactionHint;
         juce::TextButton clearButton { "CLEAR" };
     };
 }

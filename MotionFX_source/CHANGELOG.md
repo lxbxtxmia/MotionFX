@@ -1,5 +1,16 @@
 # MotionFX changelog
 
+## 0.7.0 - Block 7
+
+- Limited non-Comb filter resonance to a 12 dB total boost, with a gentler squared control curve.
+- Made the Stutter playhead repaint continuously and made CLEAR refresh all lanes immediately.
+- Reduced Stutter lane typography and improved long ToggleButton text such as GAIN MATCH and TEMPO SYNC.
+- Added branching Undo/Redo history with header controls, history-point navigation and crash-recovery journaling.
+- Shortened preset names after 20 characters while exposing the full name in a tooltip.
+- Added preset creator, creation time, schema and MotionFX-version metadata.
+- Added a compatibility error when a preset was created by a newer MotionFX version.
+- Added a real TooltipWindow and compacted the header layout.
+
 ## 0.6.0 - Block 6
 
 - Signal visualisers now return smoothly to zero when audio processing stops instead of holding the last level.

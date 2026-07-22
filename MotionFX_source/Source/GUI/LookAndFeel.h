@@ -91,33 +91,59 @@ namespace mfx
             g.fillPath (pointer, juce::AffineTransform::rotation (angle).translated (centre));
         }
 
-        void drawToggleButton (juce::Graphics& g, juce::ToggleButton& button,
-                                bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override
+        void drawToggleButton (juce::Graphics& graphics,
+                               juce::ToggleButton& button,
+                               bool highlighted,
+                               bool buttonDown) override
         {
-            juce::ignoreUnused (shouldDrawButtonAsDown);
+            juce::ignoreUnused (buttonDown);
             auto bounds = button.getLocalBounds().toFloat().reduced (1.0f);
 
-            bool isPillStyle = button.getButtonText().isEmpty();
-            if (isPillStyle)
+            const bool pillStyle = button.getButtonText().isEmpty();
+            if (pillStyle)
             {
-                float radius = bounds.getHeight() * 0.5f;
-                g.setColour (button.getToggleState() ? Palette::teal.withAlpha (0.85f) : Palette::stroke);
-                g.fillRoundedRectangle (bounds, radius);
-                float knobD = bounds.getHeight() - 4.0f;
-                float knobX = button.getToggleState() ? bounds.getRight() - knobD - 2.0f : bounds.getX() + 2.0f;
-                g.setColour (Palette::text);
-                g.fillEllipse (knobX, bounds.getY() + 2.0f, knobD, knobD);
+                const float radius = bounds.getHeight() * 0.5f;
+                graphics.setColour (
+                    button.getToggleState()
+                        ? Palette::teal.withAlpha (0.85f)
+                        : Palette::stroke);
+                graphics.fillRoundedRectangle (bounds, radius);
+
+                const float knobDiameter = bounds.getHeight() - 4.0f;
+                const float knobX = button.getToggleState()
+                    ? bounds.getRight() - knobDiameter - 2.0f
+                    : bounds.getX() + 2.0f;
+
+                graphics.setColour (Palette::text);
+                graphics.fillEllipse (
+                    knobX, bounds.getY() + 2.0f,
+                    knobDiameter, knobDiameter);
+                return;
             }
-            else
-            {
-                g.setColour (shouldDrawButtonAsHighlighted ? Palette::panelHi : Palette::panel);
-                g.fillRoundedRectangle (bounds, 4.0f);
-                g.setColour (button.getToggleState() ? Palette::teal : Palette::stroke);
-                g.drawRoundedRectangle (bounds, 4.0f, 1.2f);
-                g.setColour (button.getToggleState() ? Palette::teal : Palette::textDim);
-                g.setFont (juce::Font (juce::FontOptions (bounds.getHeight() * 0.55f)));
-                g.drawFittedText (button.getButtonText(), bounds.toNearestInt(), juce::Justification::centred, 1);
-            }
+
+            graphics.setColour (
+                highlighted ? Palette::panelHi : Palette::panel);
+            graphics.fillRoundedRectangle (bounds, 4.0f);
+            graphics.setColour (
+                button.getToggleState() ? Palette::teal : Palette::stroke);
+            graphics.drawRoundedRectangle (bounds, 4.0f, 1.2f);
+            graphics.setColour (
+                button.getToggleState() ? Palette::teal : Palette::textDim);
+
+            const int length = button.getButtonText().length();
+            const float maximum = length >= 10 ? 12.0f : 14.0f;
+            const float fontSize = juce::jlimit (
+                9.5f, maximum, bounds.getHeight() * 0.34f);
+
+            graphics.setFont (
+                juce::Font (juce::FontOptions (fontSize))
+                    .withStyle (juce::Font::bold));
+            graphics.drawFittedText (
+                button.getButtonText(),
+                bounds.reduced (5.0f, 2.0f).toNearestInt(),
+                juce::Justification::centred,
+                1,
+                0.72f);
         }
 
         void drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour&,
@@ -149,11 +175,14 @@ namespace mfx
 
         juce::Font getLabelFont (juce::Label& label) override
         {
-            return juce::Font (
-                juce::FontOptions (
-                    juce::jmax (10.0f, label.getHeight() * 0.62f)
-                )
-            );
+            const float requested = label.getFont().getHeight();
+            const float maximum = juce::jmax (
+                10.0f, label.getHeight() * 0.50f);
+            const float height = juce::jlimit (
+                9.5f, maximum, requested);
+
+            return juce::Font (juce::FontOptions (height))
+                .withStyle (label.getFont().getStyleFlags());
         }
 
         juce::Font getComboBoxFont (juce::ComboBox& box) override
@@ -170,13 +199,14 @@ namespace mfx
             return juce::Font (juce::FontOptions (14.0f));
         }
 
-        juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
+        juce::Font getTextButtonFont (
+            juce::TextButton& button, int buttonHeight) override
         {
-            return juce::Font (
-                juce::FontOptions (
-                    juce::jlimit (12.0f, 16.0f, buttonHeight * 0.42f)
-                )
-            );
+            const int length = button.getButtonText().length();
+            const float maximum = length >= 10 ? 11.5f : 15.0f;
+            const float height = juce::jlimit (
+                10.0f, maximum, buttonHeight * 0.38f);
+            return juce::Font (juce::FontOptions (height));
         }
 
         void drawTabButton (juce::TabBarButton&, juce::Graphics&, bool, bool) override {}

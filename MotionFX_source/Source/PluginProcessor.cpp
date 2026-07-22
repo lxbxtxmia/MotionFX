@@ -11,9 +11,21 @@ MotionFXAudioProcessor::MotionFXAudioProcessor()
     presetManager.attach (&apvts,
         [this] { return getOrder(); },
         [this] (std::array<EffectId, numEffects> o) { setOrder (o); });
+
+    stateHistory = std::make_unique<mfx::StateHistory> (
+        apvts,
+        *this,
+        [this] { return presetManager.getFullStateXml(); },
+        [this] (const juce::String& xml)
+        {
+            presetManager.restoreFullStateXml (xml);
+        });
 }
 
-MotionFXAudioProcessor::~MotionFXAudioProcessor() {}
+MotionFXAudioProcessor::~MotionFXAudioProcessor()
+{
+    stateHistory.reset();
+}
 
 void MotionFXAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {

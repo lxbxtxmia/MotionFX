@@ -107,6 +107,11 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     : AudioProcessorEditor (&p), processor (p)
 {
     setLookAndFeel (&lookAndFeel);
+    tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 450);
+
+    if (processor.stateHistory != nullptr)
+        processor.stateHistory->ensureTimerRunning();
+
     addAndMakeVisible (content);
 
     titleLabel.setText ("MOTIONFX", juce::dontSendNotification);
@@ -121,16 +126,59 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     presetNameButton.setTooltip ("Open preset browser");
     prevPresetBtn.setTooltip ("Previous preset");
     nextPresetBtn.setTooltip ("Next preset");
+    undoBtn.setTooltip ("Undo the last MotionFX edit");
+    redoBtn.setTooltip ("Redo the preferred history branch");
     savePresetBtn.setTooltip ("Save preset");
-    optionsBtn.setTooltip ("Options");
+    optionsBtn.setTooltip ("Options and change history");
     content.addAndMakeVisible (presetNameButton);
     presetNameButton.onClick = [this] { showPresetMenu(); };
 
-    for (auto* btn : { &prevPresetBtn, &nextPresetBtn, &savePresetBtn, &optionsBtn })
-        content.addAndMakeVisible (btn);
+    for (auto* button : {
+             &prevPresetBtn, &nextPresetBtn, &undoBtn, &redoBtn,
+             &savePresetBtn, &optionsBtn
+         })
+    {
+        content.addAndMakeVisible (button);
+    }
 
-    prevPresetBtn.onClick = [this] { processor.presetManager.previous(); refreshPresetLabel(); };
-    nextPresetBtn.onClick = [this] { processor.presetManager.next(); refreshPresetLabel(); };
+    prevPresetBtn.onClick = [this]
+    {
+        const bool loaded = processor.presetManager.previous();
+        showPresetLoadErrorIfAny();
+        if (loaded && processor.stateHistory != nullptr)
+            processor.stateHistory->notifyExternalChange ("Preset change");
+        refreshPresetLabel();
+        resized();
+    };
+
+    nextPresetBtn.onClick = [this]
+    {
+        const bool loaded = processor.presetManager.next();
+        showPresetLoadErrorIfAny();
+        if (loaded && processor.stateHistory != nullptr)
+            processor.stateHistory->notifyExternalChange ("Preset change");
+        refreshPresetLabel();
+        resized();
+    };
+
+    undoBtn.onClick = [this]
+    {
+        if (processor.stateHistory != nullptr)
+            processor.stateHistory->undo();
+        refreshPresetLabel();
+        tabStrip.setOrder (processor.getOrder());
+        resized();
+    };
+
+    redoBtn.onClick = [this]
+    {
+        if (processor.stateHistory != nullptr)
+            processor.stateHistory->redo();
+        refreshPresetLabel();
+        tabStrip.setOrder (processor.getOrder());
+        resized();
+    };
+
     savePresetBtn.onClick = [this] { savePresetDialog(); };
     optionsBtn.onClick = [this] { showOptionsMenu(); };
 
@@ -156,6 +204,9 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
                                           : oldOrder[(size_t) juce::jlimit (0, numEffects - 1, selectedSlot)];
 
         processor.setOrder (newOrder);
+
+        if (processor.stateHistory != nullptr)
+            processor.stateHistory->notifyExternalChange ("Effect order");
 
         if (! stutterWasSelected)
         {
@@ -212,65 +263,105 @@ void MotionFXAudioProcessorEditor::setScalePercent (int percent)
 
 void MotionFXAudioProcessorEditor::resized()
 {
-    // keep the transform in sync whenever the outer window changes size --
-    // covers both corner-drag resizing and the discrete scale menu.
-    float scale = getWidth() / (float) baseW;
+    const float scale = getWidth() / (float) baseW;
     scalePercent = juce::roundToInt (scale * 100.0f);
     content.setTransform (juce::AffineTransform::scale (scale));
     content.setBounds (0, 0, baseW, baseH);
 
-    auto b = content.getLocalBounds().reduced (14);
+    auto bounds = content.getLocalBounds().reduced (14);
+    auto header = bounds.removeFromTop (78);
 
-    auto header = b.removeFromTop (78);
-    titleLabel.setBounds (header.removeFromLeft (170).reduced (0, 10));
+    titleLabel.setBounds (
+        header.removeFromLeft (158).reduced (0, 10));
 
-    auto masterArea = header.removeFromRight (390);
-    matchGainToggle->setBounds (masterArea.removeFromRight (88).reduced (2, 19));
+    auto masterArea = header.removeFromRight (410);
+    matchGainToggle->setBounds (
+        masterArea.removeFromRight (108).reduced (2, 19));
     dryWetKnob->setBounds (masterArea.removeFromRight (98));
     outputKnob->setBounds (masterArea.removeFromRight (98));
     inputKnob->setBounds (masterArea.removeFromRight (98));
 
     auto presetBar = header;
-    optionsBtn.setBounds (presetBar.removeFromRight (38).reduced (1, 20));
+    optionsBtn.setBounds (
+        presetBar.removeFromRight (36).reduced (1, 20));
     presetBar.removeFromRight (5);
-    savePresetBtn.setBounds (presetBar.removeFromRight (62).reduced (0, 20));
+    savePresetBtn.setBounds (
+        presetBar.removeFromRight (58).reduced (0, 20));
     presetBar.removeFromRight (5);
-    nextPresetBtn.setBounds (presetBar.removeFromRight (32).reduced (0, 20));
-    prevPresetBtn.setBounds (presetBar.removeFromLeft (32).reduced (0, 20));
+    redoBtn.setBounds (
+        presetBar.removeFromRight (44).reduced (0, 20));
+    presetBar.removeFromRight (5);
+    undoBtn.setBounds (
+        presetBar.removeFromRight (44).reduced (0, 20));
+    presetBar.removeFromRight (5);
+    nextPresetBtn.setBounds (
+        presetBar.removeFromRight (30).reduced (0, 20));
+    prevPresetBtn.setBounds (
+        presetBar.removeFromLeft (30).reduced (0, 20));
     presetNameButton.setBounds (presetBar.reduced (0, 20));
 
-    b.removeFromTop (8);
-    tabStrip.setBounds (b.removeFromTop (42));
-    b.removeFromTop (10);
+    bounds.removeFromTop (8);
+    tabStrip.setBounds (bounds.removeFromTop (42));
+    bounds.removeFromTop (10);
 
-    auto order = processor.getOrder();
+    const auto order = processor.getOrder();
+
     for (int slot = 0; slot < numEffects; ++slot)
     {
-        bool visible = (slot == selectedSlot);
-        auto* panel = effectPanels[(size_t) order[(size_t) slot]].get();
+        const bool visible = slot == selectedSlot;
+        auto* panel = effectPanels[
+            (size_t) order[(size_t) slot]].get();
         panel->setVisible (visible);
-        if (visible) panel->setBounds (b);
+
+        if (visible)
+            panel->setBounds (bounds);
     }
-    bool stutterVisible = (selectedSlot == numEffects);
+
+    const bool stutterVisible = selectedSlot == numEffects;
     stutterPanel->setVisible (stutterVisible);
-    if (stutterVisible) stutterPanel->setBounds (b);
+
+    if (stutterVisible)
+        stutterPanel->setBounds (bounds);
 }
 
 void MotionFXAudioProcessorEditor::refreshPresetLabel()
 {
-    const auto displayName = processor.presetManager.getDisplayName();
-    if (presetNameButton.getButtonText() != displayName)
-        presetNameButton.setButtonText (displayName);
+    const auto fullName = processor.presetManager.getCurrentName();
+    const bool modified = processor.presetManager.isCurrentPresetModified();
 
-    presetNameButton.setTooltip (processor.presetManager.isCurrentPresetModified()
-                                     ? "Preset modified — click to browse presets"
-                                     : "Open preset browser");
+    auto shortened = fullName.length() > 20
+        ? fullName.substring (0, 20) + "..."
+        : fullName;
+
+    if (modified)
+        shortened += "*";
+
+    if (presetNameButton.getButtonText() != shortened)
+        presetNameButton.setButtonText (shortened);
+
+    juce::String tooltip = fullName;
+    if (modified)
+        tooltip += "\nModified";
+
+    tooltip += "\nClick to browse presets";
+    presetNameButton.setTooltip (tooltip);
 }
 
 void MotionFXAudioProcessorEditor::timerCallback()
 {
     tabStrip.setOrder (processor.getOrder());
     refreshPresetLabel();
+
+    if (processor.stateHistory != nullptr)
+    {
+        undoBtn.setEnabled (processor.stateHistory->canUndo());
+        redoBtn.setEnabled (processor.stateHistory->canRedo());
+    }
+    else
+    {
+        undoBtn.setEnabled (false);
+        redoBtn.setEnabled (false);
+    }
 }
 
 void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
@@ -281,7 +372,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.6.0 - Build 6
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.7.0 - Build 7
 
 Multi-effect modulation VST3.
 
@@ -297,7 +388,14 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.6.0 - Build 6
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.7.0 - Build 7
+- Limited non-Comb filter resonance to a 12 dB total boost.
+- Added continuous Stutter playhead and CLEAR refresh.
+- Improved Stutter, GAIN MATCH and TEMPO SYNC typography.
+- Added branching Undo/Redo history and crash recovery.
+- Added compact preset names, author/version metadata and compatibility checks.
+
+0.6.0 - Build 6
 - Signal visualisers decay to zero when audio processing stops.
 - Dragged tabs use a neutral ghost style.
 - Rebuilt Stutter as independent Repeat, Reverse, Tape, Pitch and Gate lanes.
@@ -413,8 +511,15 @@ void MotionFXAudioProcessorEditor::showPresetMenu()
     {
         if (result > 0 && result < 9000)
         {
-            processor.presetManager.loadByCombinedIndex (result - 1);
+            const bool loaded = processor.presetManager.loadByCombinedIndex (
+                result - 1);
+            showPresetLoadErrorIfAny();
+
+            if (loaded && processor.stateHistory != nullptr)
+                processor.stateHistory->notifyExternalChange ("Preset change");
+
             refreshPresetLabel();
+            resized();
         }
         else if (result == 9001) savePresetDialog();
         else if (result == 9002) createPresetFolderDialog();
@@ -423,22 +528,54 @@ void MotionFXAudioProcessorEditor::showPresetMenu()
 
 void MotionFXAudioProcessorEditor::savePresetDialog()
 {
-    auto aw = std::make_shared<juce::AlertWindow> ("Save Preset",
-        "Enter a name and an optional folder path (for example User Made/Drums):", juce::MessageBoxIconType::NoIcon);
-    aw->addTextEditor ("name", processor.presetManager.getCurrentName() == "Init" ? "New Preset" : processor.presetManager.getCurrentName());
-    aw->addTextEditor ("folder", "User Made");
-    aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result) mutable
+    auto alert = std::make_shared<juce::AlertWindow> (
+        "Save Preset",
+        "Enter a preset name, optional folder and author metadata:",
+        juce::MessageBoxIconType::NoIcon);
+
+    alert->addTextEditor (
+        "name",
+        processor.presetManager.getCurrentName() == "Init"
+            ? "New Preset"
+            : processor.presetManager.getCurrentName());
+    alert->addTextEditor ("folder", "User Made");
+    alert->addTextEditor (
+        "author",
+        mfx::PresetManager::getDefaultAuthor());
+
+    alert->addButton (
+        "Save", 1,
+        juce::KeyPress (juce::KeyPress::returnKey));
+    alert->addButton (
+        "Cancel", 0,
+        juce::KeyPress (juce::KeyPress::escapeKey));
+
+    alert->enterModalState (
+        true,
+        juce::ModalCallbackFunction::create (
+            [this, alert] (int result) mutable
     {
         if (result == 1)
         {
-            auto name = aw->getTextEditorContents ("name").trim();
-            auto folder = aw->getTextEditorContents ("folder").trim();
-            if (name.isNotEmpty() && processor.presetManager.saveUserPreset (name, folder))
+            const auto name = alert->getTextEditorContents ("name").trim();
+            const auto folder = alert->getTextEditorContents ("folder").trim();
+            const auto author = alert->getTextEditorContents ("author").trim();
+
+            const bool saved = processor.presetManager.saveUserPreset (
+                name, folder, author);
+
+            showPresetLoadErrorIfAny();
+
+            if (saved)
+            {
+                if (processor.stateHistory != nullptr)
+                    processor.stateHistory->notifyExternalChange (
+                        "Preset saved");
                 refreshPresetLabel();
+            }
         }
-        aw.reset();
+
+        alert.reset();
     }));
 }
 
@@ -457,13 +594,62 @@ void MotionFXAudioProcessorEditor::createPresetFolderDialog()
     }));
 }
 
+void MotionFXAudioProcessorEditor::showPresetLoadErrorIfAny()
+{
+    const auto error = processor.presetManager.takeLastError();
+    if (error.isEmpty())
+        return;
+
+    juce::AlertWindow::showMessageBoxAsync (
+        juce::MessageBoxIconType::WarningIcon,
+        "MotionFX Preset",
+        error);
+}
+
 void MotionFXAudioProcessorEditor::showOptionsMenu()
 {
     juce::PopupMenu menu;
     juce::PopupMenu scaleMenu;
-    for (int pct : { 25, 50, 75, 100, 150, 200, 300 })
-        scaleMenu.addItem (1000 + pct, juce::String (pct) + "%", true, scalePercent == pct);
+
+    for (int percent : { 25, 50, 75, 100, 150, 200, 300 })
+    {
+        scaleMenu.addItem (
+            1000 + percent,
+            juce::String (percent) + "%",
+            true,
+            scalePercent == percent);
+    }
+
     menu.addSubMenu ("Interface Scale", scaleMenu);
+    menu.addSeparator();
+
+    if (processor.stateHistory != nullptr)
+    {
+        menu.addItem (10, "Undo", processor.stateHistory->canUndo());
+        menu.addItem (11, "Redo", processor.stateHistory->canRedo());
+
+        juce::PopupMenu historyMenu;
+        const auto items = processor.stateHistory->getHistoryItems();
+
+        for (const auto& item : items)
+        {
+            const auto indentation = juce::String::repeatedString (
+                "  ", juce::jmin (4, item.depth));
+            historyMenu.addItem (
+                20000 + item.nodeIndex,
+                indentation + item.text,
+                true,
+                item.current);
+        }
+
+        menu.addSubMenu ("Change History", historyMenu, ! items.empty());
+
+        if (processor.stateHistory->hasCrashRecovery())
+            menu.addItem (12, "Restore Last Crash Recovery...");
+
+        menu.addSeparator();
+    }
+
     menu.addItem (3, "Open Preset Browser...");
     menu.addItem (4, "Save Preset...");
     menu.addItem (5, "Create Preset Folder...");
@@ -474,35 +660,91 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     menu.addSeparator();
     menu.addItem (7, "About / Changelog...");
 
-    menu.showMenuAsync (juce::PopupMenu::Options(), [this] (int result)
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetComponent (&optionsBtn),
+        [this] (int result)
     {
-        if (result >= 1000)
+        if (result >= 20000)
+        {
+            if (processor.stateHistory != nullptr)
+                processor.stateHistory->jumpToNode (result - 20000);
+
+            refreshPresetLabel();
+            tabStrip.setOrder (processor.getOrder());
+            resized();
+        }
+        else if (result >= 1000)
         {
             setScalePercent (result - 1000);
         }
-        else if (result == 3) showPresetMenu();
-        else if (result == 4) savePresetDialog();
-        else if (result == 5) createPresetFolderDialog();
+        else if (result == 10)
+        {
+            if (processor.stateHistory != nullptr)
+                processor.stateHistory->undo();
+
+            refreshPresetLabel();
+            tabStrip.setOrder (processor.getOrder());
+            resized();
+        }
+        else if (result == 11)
+        {
+            if (processor.stateHistory != nullptr)
+                processor.stateHistory->redo();
+
+            refreshPresetLabel();
+            tabStrip.setOrder (processor.getOrder());
+            resized();
+        }
+        else if (result == 12)
+        {
+            if (processor.stateHistory != nullptr
+                && processor.stateHistory->restoreCrashRecovery())
+            {
+                refreshPresetLabel();
+                tabStrip.setOrder (processor.getOrder());
+                resized();
+            }
+        }
+        else if (result == 3)
+        {
+            showPresetMenu();
+        }
+        else if (result == 4)
+        {
+            savePresetDialog();
+        }
+        else if (result == 5)
+        {
+            createPresetFolderDialog();
+        }
         else if (result == 1)
         {
-            auto chooser = std::make_shared<juce::FileChooser> ("Choose a folder for MotionFX presets",
-                                                                  processor.presetManager.getPresetDirectory());
-            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                [this, chooser] (const juce::FileChooser& fc)
-                {
-                    auto dir = fc.getResult();
-                    if (dir != juce::File())
-                        processor.presetManager.setPresetDirectory (dir);
-                });
+            auto chooser = std::make_shared<juce::FileChooser> (
+                "Choose a folder for MotionFX presets",
+                processor.presetManager.getPresetDirectory());
+
+            chooser->launchAsync (
+                juce::FileBrowserComponent::openMode
+                    | juce::FileBrowserComponent::canSelectDirectories,
+                [this, chooser] (const juce::FileChooser& fileChooser)
+            {
+                const auto directory = fileChooser.getResult();
+                if (directory != juce::File())
+                    processor.presetManager.setPresetDirectory (directory);
+            });
         }
         else if (result == 2)
         {
-            processor.presetManager.setPresetDirectory (mfx::PresetManager::getDefaultPresetDirectory());
+            processor.presetManager.setPresetDirectory (
+                mfx::PresetManager::getDefaultPresetDirectory());
         }
         else if (result == 6)
         {
             processor.presetManager.getPresetDirectory().startAsProcess();
         }
-        else if (result == 7) showAboutDialog();
+        else if (result == 7)
+        {
+            showAboutDialog();
+        }
     });
 }

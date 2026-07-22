@@ -10,12 +10,51 @@ namespace mfx
     class FilterEffect
     {
     public:
-        void prepare (double sr, int) noexcept
+        static constexpr float maximumResonanceBoostDb = 12.0f;
+
+        static float resonanceQForStages (float normalisedResonance,
+                                          int numberOfStages) noexcept
         {
-            sampleRate = juce::jmax (1.0, sr);
-            const int maxCombSamples = juce::jmax (32, (int) std::ceil (sampleRate * 0.25));
+            const int stages = juce::jlimit (1, 4, numberOfStages);
+            const float shaped = std::pow (
+                juce::jlimit (0.0f, 1.0f, normalisedResonance), 2.0f);
+
+            const float maximumMagnitude = std::pow (
+                10.0f,
+                maximumResonanceBoostDb / (20.0f * (float) stages));
+            const float magnitudeSquared =
+                maximumMagnitude * maximumMagnitude;
+
+            // Exact inverse of the resonant LP/HP biquad peak:
+            // Mpeak = Q / sqrt (1 - 1 / (4 Q^2)).
+            const float qSquared = 0.5f * (
+                magnitudeSquared
+                + std::sqrt (magnitudeSquared * magnitudeSquared
+                             - magnitudeSquared));
+            const float maximumQ = std::sqrt (qSquared);
+
+            return juce::jmap (
+                shaped, 0.0f, 1.0f, 0.70710678f, maximumQ);
+        }
+
+        static float peakGainDbPerStage (float normalisedResonance,
+                                         int numberOfStages) noexcept
+        {
+            const int stages = juce::jlimit (1, 4, numberOfStages);
+            const float shaped = std::pow (
+                juce::jlimit (0.0f, 1.0f, normalisedResonance), 2.0f);
+            return maximumResonanceBoostDb * shaped / (float) stages;
+        }
+
+        void prepare (double sampleRateToUse, int) noexcept
+        {
+            sampleRate = juce::jmax (1.0, sampleRateToUse);
+            const int maxCombSamples = juce::jmax (
+                32, (int) std::ceil (sampleRate * 0.25));
+
             for (auto& buffer : combBuffer)
                 buffer.assign ((size_t) maxCombSamples, 0.0f);
+
             combCapacity = maxCombSamples;
             mixSm.reset (sampleRate, 15.0f, 1.0f);
             reset();
@@ -35,14 +74,17 @@ namespace mfx
 
         void setMode (FilterMode newMode) noexcept { mode = newMode; }
 
-        void setParams (float resonanceNormalised, int slopeChoice, float mixNormalised) noexcept
+        void setParams (float resonanceNormalised,
+                        int slopeChoice,
+                        float mixNormalised) noexcept
         {
             resonance = juce::jlimit (0.0f, 1.0f, resonanceNormalised);
             activeStages = juce::jlimit (1, 4, slopeChoice + 1);
             mix = juce::jlimit (0.0f, 1.0f, mixNormalised);
         }
 
-        void processBlock (juce::AudioBuffer<float>& buffer, float cutoffNormalised) noexcept
+        void processBlock (juce::AudioBuffer<float>& buffer,
+                           float cutoffNormalised) noexcept
         {
             if (buffer.getNumChannels() < 2)
                 return;
@@ -63,29 +105,31 @@ namespace mfx
 
             for (int sample = 0; sample < numSamples; ++sample)
             {
-                const float dryL = left[sample];
-                const float dryR = right[sample];
+                const float dryLeft = left[sample];
+                const float dryRight = right[sample];
 
-                float wetL = dryL;
-                float wetR = dryR;
+                float wetLeft = dryLeft;
+                float wetRight = dryRight;
 
                 for (int stage = 0; stage < activeStages; ++stage)
                 {
-                    wetL = biquads[0][(size_t) stage].process (wetL);
-                    wetR = biquads[1][(size_t) stage].process (wetR);
+                    wetLeft = biquads[0][(size_t) stage].process (wetLeft);
+                    wetRight = biquads[1][(size_t) stage].process (wetRight);
                 }
 
                 mixSm.setTarget (mix);
                 const float amount = mixSm.next();
-                left[sample] = flushDenorm (dryL + (wetL - dryL) * amount);
-                right[sample] = flushDenorm (dryR + (wetR - dryR) * amount);
+                left[sample] = flushDenorm (
+                    dryLeft + (wetLeft - dryLeft) * amount);
+                right[sample] = flushDenorm (
+                    dryRight + (wetRight - dryRight) * amount);
             }
         }
 
         static float normalisedToHz (float normalised) noexcept
         {
-            const float n = juce::jlimit (0.0f, 1.0f, normalised);
-            return 20.0f * std::pow (1000.0f, n);
+            const float value = juce::jlimit (0.0f, 1.0f, normalised);
+            return 20.0f * std::pow (1000.0f, value);
         }
 
         static float hzToNormalised (float hz) noexcept
@@ -106,12 +150,12 @@ namespace mfx
             void set (float newB0, float newB1, float newB2,
                       float newA0, float newA1, float newA2) noexcept
             {
-                const float invA0 = 1.0f / juce::jmax (1.0e-9f, newA0);
-                b0 = newB0 * invA0;
-                b1 = newB1 * invA0;
-                b2 = newB2 * invA0;
-                a1 = newA1 * invA0;
-                a2 = newA2 * invA0;
+                const float inverseA0 = 1.0f / juce::jmax (1.0e-9f, newA0);
+                b0 = newB0 * inverseA0;
+                b1 = newB1 * inverseA0;
+                b2 = newB2 * inverseA0;
+                a1 = newA1 * inverseA0;
+                a2 = newA2 * inverseA0;
             }
 
             float process (float input) noexcept
@@ -125,17 +169,19 @@ namespace mfx
 
         void updateCoefficients (float requestedCutoff) noexcept
         {
-            const float cutoff = juce::jlimit (20.0f,
-                                               (float) sampleRate * 0.45f,
-                                               requestedCutoff);
-            const float q = juce::jmap (resonance, 0.0f, 1.0f, 0.55f, 12.0f);
-            const float omega = juce::MathConstants<float>::twoPi * cutoff / (float) sampleRate;
+            const float cutoff = juce::jlimit (
+                20.0f, (float) sampleRate * 0.45f, requestedCutoff);
+            const float q = resonanceQForStages (resonance, activeStages);
+            const float omega = juce::MathConstants<float>::twoPi
+                              * cutoff / (float) sampleRate;
             const float sine = std::sin (omega);
             const float cosine = std::cos (omega);
             const float alpha = sine / (2.0f * q);
 
             float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f;
-            float a0 = 1.0f + alpha, a1 = -2.0f * cosine, a2 = 1.0f - alpha;
+            float a0 = 1.0f + alpha;
+            float a1 = -2.0f * cosine;
+            float a2 = 1.0f - alpha;
 
             switch (mode)
             {
@@ -165,14 +211,16 @@ namespace mfx
 
                 case FilterMode::Peak:
                 {
-                    const float gainDb = juce::jmap (resonance, 0.0f, 1.0f, 3.0f, 15.0f);
-                    const float A = std::pow (10.0f, gainDb / 40.0f);
-                    b0 = 1.0f + alpha * A;
+                    const float gainDb = peakGainDbPerStage (
+                        resonance, activeStages);
+                    const float amplitude = std::pow (10.0f, gainDb / 40.0f);
+
+                    b0 = 1.0f + alpha * amplitude;
                     b1 = -2.0f * cosine;
-                    b2 = 1.0f - alpha * A;
-                    a0 = 1.0f + alpha / A;
+                    b2 = 1.0f - alpha * amplitude;
+                    a0 = 1.0f + alpha / amplitude;
                     a1 = -2.0f * cosine;
-                    a2 = 1.0f - alpha / A;
+                    a2 = 1.0f - alpha / amplitude;
                     break;
                 }
 
@@ -188,46 +236,54 @@ namespace mfx
         float readComb (int channel, float delaySamples) const noexcept
         {
             float position = (float) combWritePos - delaySamples;
+
             while (position < 0.0f)
                 position += (float) combCapacity;
 
-            const int index0 = ((int) position) % combCapacity;
-            const int index1 = (index0 + 1) % combCapacity;
+            const int first = ((int) position) % combCapacity;
+            const int second = (first + 1) % combCapacity;
             const float fraction = position - std::floor (position);
             const auto& data = combBuffer[(size_t) channel];
-            return data[(size_t) index0]
-                 + fraction * (data[(size_t) index1] - data[(size_t) index0]);
+
+            return data[(size_t) first]
+                 + fraction * (data[(size_t) second] - data[(size_t) first]);
         }
 
-        void processComb (juce::AudioBuffer<float>& buffer, float frequencyHz) noexcept
+        void processComb (juce::AudioBuffer<float>& buffer,
+                          float frequencyHz) noexcept
         {
             auto* left = buffer.getWritePointer (0);
             auto* right = buffer.getWritePointer (1);
             const int numSamples = buffer.getNumSamples();
 
-            const float delaySamples = juce::jlimit (2.0f,
-                                                    (float) combCapacity - 2.0f,
-                                                    (float) sampleRate / juce::jmax (20.0f, frequencyHz));
-            const float feedback = juce::jmap (resonance, 0.0f, 1.0f, 0.0f, 0.94f);
+            const float delaySamples = juce::jlimit (
+                2.0f,
+                (float) combCapacity - 2.0f,
+                (float) sampleRate / juce::jmax (20.0f, frequencyHz));
+
+            const float feedback = juce::jmap (
+                resonance, 0.0f, 1.0f, 0.0f, 0.94f);
 
             for (int sample = 0; sample < numSamples; ++sample)
             {
-                const float dryL = left[sample];
-                const float dryR = right[sample];
-                const float delayedL = readComb (0, delaySamples);
-                const float delayedR = readComb (1, delaySamples);
+                const float dryLeft = left[sample];
+                const float dryRight = right[sample];
+                const float delayedLeft = readComb (0, delaySamples);
+                const float delayedRight = readComb (1, delaySamples);
 
-                const float wetL = dryL + delayedL * feedback;
-                const float wetR = dryR + delayedR * feedback;
+                const float wetLeft = dryLeft + delayedLeft * feedback;
+                const float wetRight = dryRight + delayedRight * feedback;
 
-                combBuffer[0][(size_t) combWritePos] = flushDenorm (wetL);
-                combBuffer[1][(size_t) combWritePos] = flushDenorm (wetR);
+                combBuffer[0][(size_t) combWritePos] = flushDenorm (wetLeft);
+                combBuffer[1][(size_t) combWritePos] = flushDenorm (wetRight);
                 combWritePos = (combWritePos + 1) % combCapacity;
 
                 mixSm.setTarget (mix);
                 const float amount = mixSm.next();
-                left[sample] = flushDenorm (dryL + (wetL - dryL) * amount);
-                right[sample] = flushDenorm (dryR + (wetR - dryR) * amount);
+                left[sample] = flushDenorm (
+                    dryLeft + (wetLeft - dryLeft) * amount);
+                right[sample] = flushDenorm (
+                    dryRight + (wetRight - dryRight) * amount);
             }
         }
 

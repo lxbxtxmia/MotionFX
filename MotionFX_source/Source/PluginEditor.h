@@ -6,7 +6,8 @@
 #include "GUI/StutterPanel.h"
 #include "GUI/TabStrip.h"
 
-class MotionFXAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
+class MotionFXAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                     private juce::Timer
 {
 public:
     explicit MotionFXAudioProcessorEditor (MotionFXAudioProcessor&);
@@ -25,32 +26,44 @@ private:
     void refreshPresetLabel();
     void savePresetDialog();
     void createPresetFolderDialog();
+    void showPresetLoadErrorIfAny();
     void timerCallback() override;
 
     MotionFXAudioProcessor& processor;
     mfx::MotionFXLookAndFeel lookAndFeel;
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 
-    static constexpr int baseW = 1080, baseH = 720;
+    static constexpr int baseW = 1080;
+    static constexpr int baseH = 720;
     int scalePercent = 100;
 
-    juce::Component content; // fixed baseW x baseH logical canvas, scaled via AffineTransform
+    juce::Component content;
 
-    // header
     juce::Label titleLabel;
     juce::TextButton presetNameButton;
-    juce::TextButton prevPresetBtn { "<" }, nextPresetBtn { ">" };
-    juce::TextButton savePresetBtn { "Save" }, optionsBtn { juce::CharPointer_UTF8 ("\xe2\x9a\x99") };
+    juce::TextButton prevPresetBtn { "<" };
+    juce::TextButton nextPresetBtn { ">" };
+    juce::TextButton undoBtn { "UNDO" };
+    juce::TextButton redoBtn { "REDO" };
+    juce::TextButton savePresetBtn { "Save" };
+    juce::TextButton optionsBtn {
+        juce::CharPointer_UTF8 ("\xe2\x9a\x99")
+    };
 
-    std::unique_ptr<mfx::LabeledKnob> inputKnob, outputKnob, dryWetKnob;
+    std::unique_ptr<mfx::LabeledKnob> inputKnob;
+    std::unique_ptr<mfx::LabeledKnob> outputKnob;
+    std::unique_ptr<mfx::LabeledKnob> dryWetKnob;
     std::unique_ptr<mfx::LabeledToggle> matchGainToggle;
 
     mfx::TabStrip tabStrip;
     int selectedSlot = 0;
 
-    std::array<std::unique_ptr<mfx::EffectPanel>, mfx::numEffects> effectPanels;
+    std::array<std::unique_ptr<mfx::EffectPanel>,
+               mfx::numEffects> effectPanels;
     std::unique_ptr<mfx::StutterPanel> stutterPanel;
 
     std::unique_ptr<juce::ComponentBoundsConstrainer> constrainer;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MotionFXAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (
+        MotionFXAudioProcessorEditor)
 };
