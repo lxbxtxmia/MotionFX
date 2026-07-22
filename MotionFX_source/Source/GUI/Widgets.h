@@ -106,7 +106,7 @@ namespace mfx
 
     private:
         bool isTextAreaEvent (
-            const juce::MouseEvent& event) const noexcept
+            const juce::MouseEvent& event) noexcept
         {
             if (getTextBoxPosition()
                 == juce::Slider::NoTextBox)
