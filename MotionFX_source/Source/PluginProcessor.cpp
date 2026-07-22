@@ -41,6 +41,12 @@ static float freeRateToHz (float value, int unit) noexcept
     return unit == 1 ? 1.0f / juce::jmax (0.01f, value) : value;
 }
 
+static float spaceDelayRateHzFromPercent (float percent) noexcept
+{
+    const float normalised = juce::jlimit (0.0f, 100.0f, percent) / 100.0f;
+    return 0.1f * std::pow (200.0f, normalised);
+}
+
 void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& prefix, int numSamples)
 {
     juce::ignoreUnused (numSamples);
@@ -101,9 +107,26 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
             chain.volume.setMode ((mfx::VolumeMode) (int) raw ("mode"));
             break;
         case EffectId::Space:
-            chain.space.setMode ((mfx::SpaceMode) (int) raw ("mode"));
-            chain.space.setParams (raw ("size") / 100.0f, raw ("decay") / 100.0f, raw ("tone") / 100.0f);
+        {
+            const int modeIndex = (int) raw ("mode");
+            chain.space.setMode ((mfx::SpaceMode) modeIndex);
+            chain.space.setParams (raw ("size") / 100.0f,
+                                   raw ("decay") / 100.0f,
+                                   raw ("tone") / 100.0f);
+
+            const bool delayMode = modeIndex == 2 || modeIndex == 3 || modeIndex == 5;
+            if (delayMode)
+            {
+                float delaySeconds = 1.0f / spaceDelayRateHzFromPercent (raw ("size"));
+                if (raw ("delay_synced") > 0.5f)
+                {
+                    const double beats = mfx::syncDivToBeats (toDiv ((int) raw ("delay_div")));
+                    delaySeconds = (float) (beats * 60.0 / juce::jmax (1.0, currentTransport.bpm));
+                }
+                chain.space.setDelayTimeSeconds (delaySeconds);
+            }
             break;
+        }
         case EffectId::Retro:
             chain.retro.setMode ((mfx::RetroMode) (int) raw ("mode"));
             chain.retro.setParams (raw ("rate") / 100.0f, raw ("tone") / 100.0f, raw ("mix") / 100.0f);
@@ -111,6 +134,12 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
         case EffectId::Width:
             chain.width.setMode ((mfx::WidthMode) (int) raw ("mode"));
             chain.width.setParams (raw ("crossover") / 100.0f);
+            break;
+        case EffectId::Filter:
+            chain.filter.setMode ((mfx::FilterMode) (int) raw ("mode"));
+            chain.filter.setParams (raw ("resonance") / 100.0f,
+                                    (int) raw ("slope"),
+                                    raw ("mix") / 100.0f);
             break;
     }
 }

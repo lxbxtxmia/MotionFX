@@ -1,5 +1,6 @@
 #pragma once
 #include "Widgets.h"
+#include <cmath>
 
 namespace mfx
 {
@@ -15,8 +16,11 @@ namespace mfx
     class EffectPanel : public juce::Component, private juce::Timer
     {
     public:
-        EffectPanel (juce::AudioProcessorValueTreeState& s, EffectChain& c, EffectPanelSpec spec, EffectId effectId)
-            : apvts (s), chain (c), theSpec (std::move (spec)), id (effectId)
+        EffectPanel (juce::AudioProcessorValueTreeState& state,
+                     EffectChain& effectChain,
+                     EffectPanelSpec spec,
+                     EffectId effectId)
+            : apvts (state), chain (effectChain), theSpec (std::move (spec)), id (effectId)
         {
             enableToggle = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_enabled", "ON");
             modeCombo = std::make_unique<LabeledCombo> (apvts, theSpec.modeParamId, "MODE");
@@ -25,14 +29,18 @@ namespace mfx
             addAndMakeVisible (*modeCombo);
             addAndMakeVisible (*primaryKnob);
 
-            for (auto& sk : theSpec.secondaryKnobs)
+            for (const auto& secondary : theSpec.secondaryKnobs)
             {
-                auto knob = std::make_unique<LabeledKnob> (apvts, sk.first, sk.second, theSpec.accent);
+                auto knob = std::make_unique<LabeledKnob> (apvts, secondary.first, secondary.second, theSpec.accent);
                 addAndMakeVisible (*knob);
                 secondaryKnobs.push_back (std::move (knob));
             }
 
-            visualizer = std::make_unique<ModVisualizer> (chain.uiModValue[(size_t) id], theSpec.accent);
+            visualizer = std::make_unique<ModVisualizer> (
+                chain.uiModValue[(size_t) id],
+                chain.uiInputLevel[(size_t) id],
+                chain.uiOutputLevel[(size_t) id],
+                theSpec.accent);
             addAndMakeVisible (*visualizer);
 
             modSourceCombo = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_modsource", "MOD SOURCE");
@@ -47,8 +55,8 @@ namespace mfx
             lfoDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_lfo_div", "DIVISION");
             addComponents ({ lfoShape.get(), lfoSynced.get(), lfoRate.get(), lfoRateUnit.get(), lfoDiv.get() });
 
-            envAttack = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_attack", "ATTACK ms", theSpec.accent);
-            envRelease = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_release", "RELEASE ms", theSpec.accent);
+            envAttack = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_attack", "ATTACK", theSpec.accent);
+            envRelease = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_env_release", "RELEASE", theSpec.accent);
             addComponents ({ envAttack.get(), envRelease.get() });
 
             motionShape = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_motion_shape", "SHAPE");
@@ -67,15 +75,36 @@ namespace mfx
             seqRate = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_rate", "RATE", theSpec.accent);
             seqRateUnit = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_seq_rateunit", "UNIT");
             seqDiv = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_seq_div", "STEP DIVISION");
-            seqSmooth = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_smooth", "SMOOTH ms", theSpec.accent);
+            seqSmooth = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_seq_smooth", "SMOOTH", theSpec.accent);
             addComponents ({ seqSteps.get(), seqSynced.get(), seqRate.get(), seqRateUnit.get(), seqDiv.get(), seqSmooth.get() });
 
             seqGrid = std::make_unique<StepBarGrid> (apvts, theSpec.prefix + "_seq_step", theSpec.accent);
             seqGrid->setCurrentStepProvider ([this] { return chain.slots[(size_t) id].mod.seq.getCurrentStepIndex(); });
             addAndMakeVisible (*seqGrid);
 
+            if (id == EffectId::Space)
+            {
+                spaceDelaySync = std::make_unique<LabeledToggle> (apvts, "space_delay_synced", "TEMPO SYNC");
+                spaceDelayUnit = std::make_unique<LabeledCombo> (apvts, "space_delay_rateunit", "TIME UNIT");
+                spaceDelayDivision = std::make_unique<LabeledCombo> (apvts, "space_delay_div", "DELAY TIME");
+                addComponents ({ spaceDelaySync.get(), spaceDelayUnit.get(), spaceDelayDivision.get() });
+            }
+
+            if (id == EffectId::Filter)
+            {
+                filterSlope = std::make_unique<LabeledCombo> (apvts, "filter_slope", "SLOPE");
+                addAndMakeVisible (*filterSlope);
+                primaryKnob->setTextFunctions (
+                    [] (double percent) { return juce::String (filterHzFromPercent (percent), 2) + " Hz"; },
+                    [] (const juce::String& text) { return percentFromFilterHz (text.getDoubleValue()); });
+                primaryKnob->setLabelText ("CUTOFF");
+                primaryKnob->setTooltipText ("Filter cutoff frequency - type a value in Hz");
+            }
+
+            applyStaticContext();
             startTimerHz (15);
             refreshModContextVisibility();
+            refreshEffectContext (true);
         }
 
         void resized() override
@@ -102,6 +131,93 @@ namespace mfx
             leftComponent.setBounds (row.removeFromLeft (leftWidth));
             row.removeFromLeft (gap);
             rightComponent.setBounds (row);
+        }
+
+        static double filterHzFromPercent (double percent)
+        {
+            return 20.0 * std::pow (1000.0, juce::jlimit (0.0, 100.0, percent) / 100.0);
+        }
+
+        static double percentFromFilterHz (double hz)
+        {
+            const double clamped = juce::jlimit (20.0, 20000.0, hz);
+            return 100.0 * std::log (clamped / 20.0) / std::log (1000.0);
+        }
+
+        static double delayRateHzFromPercent (double percent)
+        {
+            return 0.1 * std::pow (200.0, juce::jlimit (0.0, 100.0, percent) / 100.0);
+        }
+
+        static double percentFromDelayRateHz (double hz)
+        {
+            const double clamped = juce::jlimit (0.1, 20.0, hz);
+            return 100.0 * std::log (clamped / 0.1) / std::log (200.0);
+        }
+
+        static bool isDelayMode (int modeIndex)
+        {
+            return modeIndex == 2 || modeIndex == 3 || modeIndex == 5;
+        }
+
+        void applyStaticContext()
+        {
+            // Keep the original visible control names. Extra context belongs in
+            // tooltips; only controls whose actual function changes with the mode
+            // (for example Space SIZE -> TIME) change their displayed name.
+            switch (id)
+            {
+                case EffectId::Drive:
+                    primaryKnob->setTooltipText ("Drive amount");
+                    break;
+                case EffectId::Pan:
+                    primaryKnob->setTooltipText ("Pan amount");
+                    break;
+                case EffectId::Volume:
+                    primaryKnob->setTooltipText ("Volume amount");
+                    break;
+                case EffectId::Space:
+                    primaryKnob->setTooltipText ("Space wet amount");
+                    break;
+                case EffectId::Retro:
+                    primaryKnob->setTooltipText ("Retro amount");
+                    break;
+                case EffectId::Width:
+                    primaryKnob->setTooltipText ("Width amount");
+                    break;
+                case EffectId::Filter:
+                    break;
+            }
+        }
+
+        static void setRateValueUnit (LabeledKnob& knob, int unitIndex)
+        {
+            const juce::String suffix = unitIndex == 1 ? " s" : " Hz";
+            knob.setTextFunctions (
+                [suffix] (double value)
+                {
+                    return juce::String (value, 2) + suffix;
+                },
+                [] (const juce::String& text)
+                {
+                    return text.getDoubleValue();
+                });
+        }
+
+        void refreshRateValueUnits()
+        {
+            const int lfoUnit = lfoRateUnit->combo.getSelectedItemIndex();
+            const int motionUnit = motionRateUnit->combo.getSelectedItemIndex();
+            const int sequencerUnit = seqRateUnit->combo.getSelectedItemIndex();
+            const int key = lfoUnit + motionUnit * 10 + sequencerUnit * 100;
+
+            if (key == lastRateUnitKey)
+                return;
+
+            setRateValueUnit (*lfoRate, lfoUnit);
+            setRateValueUnit (*motionRate, motionUnit);
+            setRateValueUnit (*seqRate, sequencerUnit);
+            lastRateUnitKey = key;
         }
 
         void layoutModulationPanel (juce::Rectangle<int> area)
@@ -195,14 +311,34 @@ namespace mfx
             top.removeFromLeft (12);
             modeCombo->setBounds (top.removeFromLeft (240));
 
+            if (filterSlope != nullptr && filterSlope->isVisible())
+            {
+                top.removeFromLeft (12);
+                filterSlope->setBounds (top.removeFromLeft (170));
+            }
+
+            if (spaceDelaySync != nullptr && spaceDelaySync->isVisible())
+            {
+                top.removeFromLeft (12);
+                spaceDelaySync->setBounds (top.removeFromLeft (126).reduced (0, 4));
+                top.removeFromLeft (8);
+                if (spaceDelayUnit->isVisible())
+                    spaceDelayUnit->setBounds (top.removeFromLeft (160));
+                else if (spaceDelayDivision->isVisible())
+                    spaceDelayDivision->setBounds (top.removeFromLeft (160));
+            }
+
             area.removeFromTop (10);
-            visualizer->setBounds (area.removeFromTop (juce::jlimit (190, 235, (int) (area.getHeight() * 0.48f))));
+            visualizer->setBounds (area.removeFromTop (
+                juce::jlimit (190, 235, (int) (area.getHeight() * 0.48f))));
             area.removeFromTop (12);
 
             std::vector<LabeledKnob*> knobs;
-            knobs.push_back (primaryKnob.get());
+            if (primaryKnob->isVisible())
+                knobs.push_back (primaryKnob.get());
             for (auto& knob : secondaryKnobs)
-                knobs.push_back (knob.get());
+                if (knob->isVisible())
+                    knobs.push_back (knob.get());
 
             constexpr int knobWidth = 126;
             constexpr int knobHeight = 138;
@@ -226,22 +362,126 @@ namespace mfx
             return false;
         }
 
+        int getChoice (const juce::String& parameterId) const
+        {
+            if (auto* value = apvts.getRawParameterValue (parameterId))
+                return (int) value->load();
+            return 0;
+        }
+
         void timerCallback() override
         {
             refreshModContextVisibility();
+            refreshEffectContext (false);
+        }
+
+        void refreshEffectContext (bool force)
+        {
+            int key = (int) id * 1000;
+
+            if (id == EffectId::Space)
+            {
+                const int mode = modeCombo->combo.getSelectedItemIndex();
+                const bool delay = isDelayMode (mode);
+                const bool synced = getBool ("delay_synced");
+                const int unit = getChoice ("space_delay_rateunit");
+                key += mode * 10 + (synced ? 2 : 0) + unit;
+
+                if (! force && key == lastEffectContextKey)
+                    return;
+
+                spaceDelaySync->setVisible (delay);
+                spaceDelayUnit->setVisible (delay && ! synced);
+                spaceDelayDivision->setVisible (delay && synced);
+
+                if (secondaryKnobs.size() >= 3)
+                {
+                    auto& timeOrSize = *secondaryKnobs[0];
+                    auto& feedbackOrDecay = *secondaryKnobs[1];
+                    auto& tone = *secondaryKnobs[2];
+
+                    if (delay)
+                    {
+                        timeOrSize.setVisible (! synced);
+                        feedbackOrDecay.setLabelText ("FEEDBACK");
+                        feedbackOrDecay.setTooltipText ("Delay feedback - higher values create more repeats");
+                        tone.setLabelText ("TONE");
+                        tone.setTooltipText ("Delay colour");
+
+                        if (unit == 0)
+                        {
+                            timeOrSize.setLabelText ("RATE");
+                            timeOrSize.setTooltipText ("Delay repetition rate in cycles per second");
+                            timeOrSize.setTextFunctions (
+                                [] (double percent) { return juce::String (delayRateHzFromPercent (percent), 2) + " Hz"; },
+                                [] (const juce::String& text) { return percentFromDelayRateHz (text.getDoubleValue()); });
+                        }
+                        else
+                        {
+                            timeOrSize.setLabelText ("TIME");
+                            timeOrSize.setTooltipText ("Time between delay repeats in seconds");
+                            timeOrSize.setTextFunctions (
+                                [] (double percent) { return juce::String (1.0 / delayRateHzFromPercent (percent), 2) + " s"; },
+                                [] (const juce::String& text)
+                                {
+                                    const double seconds = juce::jmax (0.05, text.getDoubleValue());
+                                    return percentFromDelayRateHz (1.0 / seconds);
+                                });
+                        }
+                    }
+                    else
+                    {
+                        timeOrSize.setVisible (true);
+                        timeOrSize.setLabelText ("SIZE");
+                        timeOrSize.setTooltipText ("Reverb space size");
+                        timeOrSize.setFixedDecimals (2);
+                        feedbackOrDecay.setLabelText ("DECAY");
+                        feedbackOrDecay.setTooltipText ("Reverb tail length");
+                        tone.setLabelText ("TONE");
+                        tone.setTooltipText ("Reverb brightness");
+                    }
+                }
+            }
+            else if (id == EffectId::Filter)
+            {
+                const int mode = modeCombo->combo.getSelectedItemIndex();
+                key += mode;
+                if (! force && key == lastEffectContextKey)
+                    return;
+
+                const bool comb = mode == 5;
+                filterSlope->setVisible (! comb);
+                if (secondaryKnobs.size() >= 2)
+                {
+                    secondaryKnobs[0]->setLabelText (comb ? "FEEDBACK" : "RESONANCE");
+                    secondaryKnobs[0]->setTooltipText (comb ? "Comb-filter feedback"
+                                                           : "Filter resonance around the cutoff frequency");
+                    secondaryKnobs[1]->setLabelText ("MIX");
+                    secondaryKnobs[1]->setTooltipText ("Filtered signal amount");
+                }
+            }
+            else if (! force && key == lastEffectContextKey)
+            {
+                return;
+            }
+
+            lastEffectContextKey = key;
+            resized();
+            repaint();
         }
 
         void refreshModContextVisibility()
         {
+            refreshRateValueUnits();
             const int source = modSourceCombo->combo.getSelectedItemIndex();
             const bool isLfo = source == 1;
-            const bool isEnv = source == 2;
+            const bool isEnvelope = source == 2;
             const bool isMotion = source == 3;
-            const bool isSeq = source == 4;
+            const bool isSequencer = source == 4;
 
             const bool lfoTempo = getBool ("lfo_synced");
             const bool motionTempo = getBool ("motion_synced");
-            const bool seqTempo = getBool ("seq_synced");
+            const bool sequencerTempo = getBool ("seq_synced");
 
             lfoShape->setVisible (isLfo);
             lfoSynced->setVisible (isLfo);
@@ -249,8 +489,8 @@ namespace mfx
             lfoRateUnit->setVisible (isLfo && ! lfoTempo);
             lfoDiv->setVisible (isLfo && lfoTempo);
 
-            envAttack->setVisible (isEnv);
-            envRelease->setVisible (isEnv);
+            envAttack->setVisible (isEnvelope);
+            envRelease->setVisible (isEnvelope);
 
             motionShape->setVisible (isMotion);
             motionMode->setVisible (isMotion);
@@ -260,14 +500,14 @@ namespace mfx
             motionDiv->setVisible (isMotion && motionTempo);
             motionSmooth->setVisible (isMotion);
 
-            seqSteps->setVisible (isSeq);
-            seqSynced->setVisible (isSeq);
-            seqRate->setVisible (isSeq && ! seqTempo);
-            seqRateUnit->setVisible (isSeq && ! seqTempo);
-            seqDiv->setVisible (isSeq && seqTempo);
-            seqSmooth->setVisible (isSeq);
-            seqGrid->setVisible (isSeq);
-            if (isSeq)
+            seqSteps->setVisible (isSequencer);
+            seqSynced->setVisible (isSequencer);
+            seqRate->setVisible (isSequencer && ! sequencerTempo);
+            seqRateUnit->setVisible (isSequencer && ! sequencerTempo);
+            seqDiv->setVisible (isSequencer && sequencerTempo);
+            seqSmooth->setVisible (isSequencer);
+            seqGrid->setVisible (isSequencer);
+            if (isSequencer)
                 seqGrid->setNumSteps ((int) apvts.getRawParameterValue (theSpec.prefix + "_seq_numsteps")->load());
 
             visualizer->setActive (source != 0);
@@ -290,16 +530,19 @@ namespace mfx
         std::unique_ptr<LabeledCombo> lfoShape, lfoRateUnit, lfoDiv;
         std::unique_ptr<LabeledToggle> lfoSynced;
         std::unique_ptr<LabeledKnob> lfoRate;
-
         std::unique_ptr<LabeledKnob> envAttack, envRelease;
-
         std::unique_ptr<LabeledCombo> motionShape, motionMode, motionRateUnit, motionDiv;
         std::unique_ptr<LabeledToggle> motionSynced;
         std::unique_ptr<LabeledKnob> motionRate, motionSmooth;
-
         std::unique_ptr<LabeledKnob> seqSteps, seqRate, seqSmooth;
         std::unique_ptr<LabeledToggle> seqSynced;
         std::unique_ptr<LabeledCombo> seqRateUnit, seqDiv;
         std::unique_ptr<StepBarGrid> seqGrid;
+
+        std::unique_ptr<LabeledToggle> spaceDelaySync;
+        std::unique_ptr<LabeledCombo> spaceDelayUnit, spaceDelayDivision;
+        std::unique_ptr<LabeledCombo> filterSlope;
+        int lastEffectContextKey = -1;
+        int lastRateUnitKey = -1;
     };
 }

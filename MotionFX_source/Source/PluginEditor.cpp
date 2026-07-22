@@ -92,6 +92,12 @@ namespace
             case EffectId::Width:
                 s.secondaryKnobs = { { "width_crossover", "X-OVER" } };
                 break;
+            case EffectId::Filter:
+                s.secondaryKnobs = {
+                    { "filter_resonance", "RESONANCE" },
+                    { "filter_mix", "MIX" }
+                };
+                break;
         }
         return s;
     }
@@ -275,7 +281,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.4.0 - Build 4
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.5.0 - Build 5
 
 Multi-effect modulation VST3.
 
@@ -291,7 +297,14 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.4.0 - Build 4
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.5.0 - Build 5
+- Added the Filter category with six modes and selectable slopes.
+- Added live input/output signal traces behind modulation displays.
+- Changed knob double-click behaviour and fixed two-decimal displays.
+- Added contextual delay/reverb labels and delay timing in Hz, seconds or tempo divisions.
+- Simplified Stutter controls and dragged-tab visuals.
+
+0.4.0 - Build 4
 - Reworked the interface hierarchy and control sizing.
 - Unified effect and modulation knob sizes.
 - Added two-decimal numeric displays and direct value entry.
@@ -452,7 +465,6 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
     menu.addItem (6, "Open Preset Folder");
     menu.addSeparator();
     menu.addItem (7, "About / Changelog...");
-    menu.addItem (8, "Open Changelog...");
 
     menu.showMenuAsync (juce::PopupMenu::Options(), [this] (int result)
     {
@@ -484,6 +496,5 @@ void MotionFXAudioProcessorEditor::showOptionsMenu()
             processor.presetManager.getPresetDirectory().startAsProcess();
         }
         else if (result == 7) showAboutDialog();
-        else if (result == 8) showChangelogDialog();
     });
 }

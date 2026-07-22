@@ -6,7 +6,8 @@ namespace mfx
     class StutterPanel : public juce::Component, private juce::Timer
     {
     public:
-        StutterPanel (juce::AudioProcessorValueTreeState& state, EffectChain& effectChain)
+        StutterPanel (juce::AudioProcessorValueTreeState& state,
+                      EffectChain& effectChain)
             : apvts (state), chain (effectChain)
         {
             enableToggle = std::make_unique<LabeledToggle> (apvts, "stutter_enabled", "ON");
@@ -21,19 +22,15 @@ namespace mfx
             addAndMakeVisible (*mixKnob);
 
             clearButton.setTooltip ("Set every cell to Off");
-            alternateButton.setTooltip ("Create an alternating Repeat 1/8 pattern");
-            clearButton.onClick = [this] { fillPattern (StepAction::Off, false); };
-            alternateButton.onClick = [this] { fillPattern (StepAction::Repeat8, true); };
+            clearButton.onClick = [this] { clearPattern(); };
             addAndMakeVisible (clearButton);
-            addAndMakeVisible (alternateButton);
 
             grid = std::make_unique<StepActionGrid> (apvts, "stutter_step");
             grid->setCurrentStepProvider ([this] { return chain.stutter.getCurrentStepIndex(); });
             addAndMakeVisible (*grid);
 
             legend.setJustificationType (juce::Justification::centredLeft);
-            legend.setText ("Each cell lasts STEP RATE. Repeat 1/4, 1/8, 1/16 and 1/32 use absolute musical loop lengths.",
-                            juce::dontSendNotification);
+            legend.setText ("Click a cell to cycle actions. Drag to paint.", juce::dontSendNotification);
             legend.setColour (juce::Label::textColourId, Palette::textDim);
             legend.setFont (juce::Font (juce::FontOptions (13.0f)));
             addAndMakeVisible (legend);
@@ -55,8 +52,6 @@ namespace mfx
             mixKnob->setBounds (controls.removeFromLeft (108));
             controls.removeFromLeft (16);
             clearButton.setBounds (controls.removeFromLeft (78).reduced (0, 27));
-            controls.removeFromLeft (8);
-            alternateButton.setBounds (controls.removeFromLeft (100).reduced (0, 27));
 
             bounds.removeFromTop (4);
             legend.setBounds (bounds.removeFromTop (24));
@@ -65,15 +60,12 @@ namespace mfx
         }
 
     private:
-        void fillPattern (StepAction action, bool alternate)
+        void clearPattern()
         {
-            const int count = (int) apvts.getRawParameterValue ("stutter_numsteps")->load();
             for (int step = 0; step < StutterEngine::maxSteps; ++step)
-            {
-                const StepAction value = step < count && (! alternate || step % 2 == 0) ? action : StepAction::Off;
                 if (auto* parameter = apvts.getParameter ("stutter_step" + juce::String (step)))
-                    parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) value));
-            }
+                    parameter->setValueNotifyingHost (
+                        parameter->convertTo0to1 ((float) StepAction::Off));
         }
 
         void timerCallback() override
@@ -88,7 +80,6 @@ namespace mfx
         std::unique_ptr<LabeledCombo> divCombo;
         std::unique_ptr<StepActionGrid> grid;
         juce::TextButton clearButton { "CLEAR" };
-        juce::TextButton alternateButton { "ALT 1/8" };
         juce::Label legend;
     };
 }

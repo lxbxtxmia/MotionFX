@@ -12,13 +12,17 @@ namespace mfx
     public:
         void mouseDoubleClick (const juce::MouseEvent& event) override
         {
-            if (isTextBoxEditable())
+            const auto relativeEvent = event.getEventRelativeTo (this);
+            const int textBoxTop = getHeight() - getTextBoxHeight() - 2;
+
+            if (getTextBoxPosition() != juce::Slider::NoTextBox
+                && relativeEvent.position.y >= (float) textBoxTop)
             {
                 showTextBox();
                 return;
             }
 
-            juce::Slider::mouseDoubleClick (event);
+            setValue (0.0, juce::sendNotificationSync);
         }
     };
 
@@ -26,50 +30,132 @@ namespace mfx
     class LabeledKnob : public juce::Component
     {
     public:
-        LabeledKnob (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
-                     const juce::String& labelText, juce::Colour accent)
+        LabeledKnob (juce::AudioProcessorValueTreeState& apvts,
+                     const juce::String& paramId,
+                     const juce::String& labelText,
+                     juce::Colour accent)
         {
             slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 20);
+            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 92, 22);
             slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
             slider.setColour (juce::Slider::textBoxTextColourId, Palette::text);
             slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
             slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-            slider.setTooltip (labelText + " - double-click the value to type it");
             addAndMakeVisible (slider);
 
             label.setText (labelText, juce::dontSendNotification);
             label.setJustificationType (juce::Justification::centred);
             label.setColour (juce::Label::textColourId, Palette::textDim);
+            label.addMouseListener (this, false);
             addAndMakeVisible (label);
 
             auto* parameter = apvts.getParameter (paramId);
-            const int decimals = dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr ? 0 : 2;
-            slider.setNumDecimalPlacesToDisplay (decimals);
-            slider.textFromValueFunction = [decimals] (double value)
-            {
-                return juce::String (value, decimals);
-            };
-            slider.valueFromTextFunction = [] (const juce::String& text)
-            {
-                return text.getDoubleValue();
-            };
+            decimalPlaces = dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr ? 0 : 2;
+            defaultUnitSuffix = inferUnitSuffix (paramId, parameter);
 
-            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, paramId, slider);
+            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+                apvts, paramId, slider);
+
+            // SliderAttachment installs parameter formatting. MotionFX formatting is
+            // applied afterwards so values remain compact and include their unit.
+            restoreDefaultFormatter();
+            setTooltipText (labelText
+                            + " - double-click knob for zero; double-click value or label to type");
         }
 
         void resized() override
         {
-            auto b = getLocalBounds();
-            label.setBounds (b.removeFromBottom (18));
-            slider.setBounds (b);
+            auto bounds = getLocalBounds();
+            label.setBounds (bounds.removeFromBottom (18));
+            slider.setBounds (bounds);
+        }
+
+        void mouseDoubleClick (const juce::MouseEvent& event) override
+        {
+            if (event.eventComponent == &label)
+                slider.showTextBox();
+        }
+
+        void setLabelText (const juce::String& text)
+        {
+            if (label.getText() != text)
+                label.setText (text, juce::dontSendNotification);
+        }
+
+        void setTooltipText (const juce::String& text)
+        {
+            slider.setTooltip (text);
+            label.setTooltip (text);
+        }
+
+        void setFixedDecimals (int decimals)
+        {
+            decimalPlaces = decimals;
+            restoreDefaultFormatter();
+        }
+
+        void setUnitSuffix (const juce::String& suffix)
+        {
+            installNumericFormatter (decimalPlaces, suffix);
+        }
+
+        void restoreDefaultFormatter()
+        {
+            installNumericFormatter (decimalPlaces, defaultUnitSuffix);
+        }
+
+        void setTextFunctions (std::function<juce::String (double)> formatter,
+                               std::function<double (const juce::String&)> parser)
+        {
+            slider.textFromValueFunction = std::move (formatter);
+            slider.valueFromTextFunction = std::move (parser);
+            slider.updateText();
         }
 
         EditableSlider slider;
 
     private:
+        static juce::String inferUnitSuffix (const juce::String& paramId,
+                                             juce::RangedAudioParameter* parameter)
+        {
+            if (dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr)
+                return {};
+
+            if (paramId == "master_input" || paramId == "master_output"
+                || paramId == "drive_outtrim")
+                return " dB";
+
+            if (paramId.endsWith ("_env_attack")
+                || paramId.endsWith ("_env_release")
+                || paramId.endsWith ("_seq_smooth"))
+                return " ms";
+
+            if (paramId.endsWith ("_lfo_rate")
+                || paramId.endsWith ("_motion_rate")
+                || paramId.endsWith ("_seq_rate"))
+                return " Hz";
+
+            return " %";
+        }
+
+        void installNumericFormatter (int decimals, const juce::String& suffix)
+        {
+            slider.setNumDecimalPlacesToDisplay (decimals);
+            slider.textFromValueFunction = [decimals, suffix] (double value)
+            {
+                return juce::String (value, decimals) + suffix;
+            };
+            slider.valueFromTextFunction = [] (const juce::String& text)
+            {
+                return text.getDoubleValue();
+            };
+            slider.updateText();
+        }
+
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+        juce::String defaultUnitSuffix;
+        int decimalPlaces = 2;
     };
 
     //==============================================================================
@@ -123,75 +209,158 @@ namespace mfx
     };
 
     //==============================================================================
-    // Scrolling live trace of the effect's final modulated parameter value -- one
-    // uniform visual language that works for LFO, envelope, motion & sequencer alike.
+    // Live input/output signal envelopes are drawn behind the modulation trace.
     class ModVisualizer : public juce::Component, private juce::Timer
     {
     public:
-        ModVisualizer (std::atomic<float>& valueSource, juce::Colour accentColour)
-            : source (valueSource), accent (accentColour)
+        ModVisualizer (std::atomic<float>& modulationSource,
+                       std::atomic<float>& inputSource,
+                       std::atomic<float>& outputSource,
+                       juce::Colour accentColour)
+            : modulation (modulationSource), input (inputSource),
+              output (outputSource), accent (accentColour)
         {
-            history.assign (160, 0.0f);
+            modulationHistory.assign (180, 0.0f);
+            inputHistory.assign (180, 0.0f);
+            outputHistory.assign (180, 0.0f);
             startTimerHz (30);
         }
 
-        void setActive (bool a) { active = a; }
-
-        void paint (juce::Graphics& g) override
+        void setActive (bool shouldShowModulation)
         {
-            auto b = getLocalBounds().toFloat();
-            g.setColour (Palette::bg1);
-            g.fillRoundedRectangle (b, 6.0f);
-            g.setColour (Palette::stroke);
-            g.drawRoundedRectangle (b.reduced (0.5f), 6.0f, 1.0f);
+            modulationActive = shouldShowModulation;
+        }
 
-            // centre gridline
-            g.setColour (Palette::stroke.withAlpha (0.5f));
-            g.drawHorizontalLine ((int) (b.getCentreY()), b.getX() + 4, b.getRight() - 4);
+        void paint (juce::Graphics& graphics) override
+        {
+            const auto bounds = getLocalBounds().toFloat();
+            graphics.setColour (Palette::bg1);
+            graphics.fillRoundedRectangle (bounds, 6.0f);
+            graphics.setColour (Palette::stroke);
+            graphics.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
 
-            if (! active)
-            {
-                g.setColour (Palette::textDim);
-                g.setFont (juce::Font (juce::FontOptions (juce::jmin (14.0f, b.getHeight() * 0.28f))));
-                g.drawFittedText ("No Modulation", b.toNearestInt(), juce::Justification::centred, 1);
-                return;
-            }
+            const auto inner = bounds.reduced (5.0f);
+            graphics.setColour (Palette::stroke.withAlpha (0.45f));
+            graphics.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
-            juce::Path p;
-            auto inner = b.reduced (4.0f);
-            for (size_t i = 0; i < history.size(); ++i)
-            {
-                float x = inner.getX() + inner.getWidth() * ((float) i / (float) (history.size() - 1));
-                float y = inner.getBottom() - history[i] * inner.getHeight();
-                if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
-            }
-            g.setColour (accent);
-            g.strokePath (p, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            drawEnvelope (graphics, inputHistory, Palette::textDim.withAlpha (0.32f), inner, false);
+            drawEnvelope (graphics, outputHistory, accent.withAlpha (0.55f), inner, true);
 
-            juce::Path fill (p);
-            fill.lineTo (inner.getRight(), inner.getBottom());
-            fill.lineTo (inner.getX(), inner.getBottom());
-            fill.closeSubPath();
-            g.setColour (accent.withAlpha (0.15f));
-            g.fillPath (fill);
+            if (modulationActive)
+                drawModulation (graphics, inner);
 
-            float last = history.back();
-            g.setColour (accent);
-            g.fillEllipse (inner.getRight() - 4.0f, inner.getBottom() - last * inner.getHeight() - 4.0f, 8.0f, 8.0f);
+            auto labelBounds = inner.toNearestInt();
+            labelBounds = labelBounds.removeFromTop (14);
+            graphics.setFont (juce::Font (juce::FontOptions (10.0f)));
+            graphics.setColour (Palette::textDim.withAlpha (0.75f));
+            graphics.drawText ("IN", labelBounds, juce::Justification::topLeft);
+            graphics.setColour (accent.withAlpha (0.85f));
+            graphics.drawText (modulationActive ? "OUT + MOD" : "OUT",
+                               labelBounds, juce::Justification::topRight);
         }
 
     private:
+        static void drawEnvelope (juce::Graphics& graphics,
+                                  const std::deque<float>& history,
+                                  juce::Colour colour,
+                                  juce::Rectangle<float> area,
+                                  bool fill)
+        {
+            if (history.size() < 2)
+                return;
+
+            juce::Path upper;
+            juce::Path lower;
+            const float centreY = area.getCentreY();
+            const float halfHeight = area.getHeight() * 0.46f;
+
+            for (size_t index = 0; index < history.size(); ++index)
+            {
+                const float x = area.getX()
+                    + area.getWidth() * ((float) index / (float) (history.size() - 1));
+                const float amplitude = juce::jlimit (0.0f, 1.0f, history[index]) * halfHeight;
+
+                if (index == 0)
+                {
+                    upper.startNewSubPath (x, centreY - amplitude);
+                    lower.startNewSubPath (x, centreY + amplitude);
+                }
+                else
+                {
+                    upper.lineTo (x, centreY - amplitude);
+                    lower.lineTo (x, centreY + amplitude);
+                }
+            }
+
+            graphics.setColour (colour);
+            graphics.strokePath (upper, juce::PathStrokeType (1.4f));
+            graphics.strokePath (lower, juce::PathStrokeType (1.4f));
+
+            if (fill)
+            {
+                juce::Path shape (upper);
+                for (size_t reverseIndex = history.size(); reverseIndex-- > 0;)
+                {
+                    const float x = area.getX()
+                        + area.getWidth() * ((float) reverseIndex / (float) (history.size() - 1));
+                    const float amplitude = juce::jlimit (0.0f, 1.0f, history[reverseIndex]) * halfHeight;
+                    shape.lineTo (x, centreY + amplitude);
+                }
+                shape.closeSubPath();
+                graphics.setColour (colour.withAlpha (colour.getFloatAlpha() * 0.22f));
+                graphics.fillPath (shape);
+            }
+        }
+
+        void drawModulation (juce::Graphics& graphics, juce::Rectangle<float> area)
+        {
+            juce::Path path;
+            for (size_t index = 0; index < modulationHistory.size(); ++index)
+            {
+                const float x = area.getX()
+                    + area.getWidth() * ((float) index / (float) (modulationHistory.size() - 1));
+                const float y = area.getBottom() - modulationHistory[index] * area.getHeight();
+                if (index == 0)
+                    path.startNewSubPath (x, y);
+                else
+                    path.lineTo (x, y);
+            }
+
+            graphics.setColour (accent.brighter (0.25f));
+            graphics.strokePath (path, juce::PathStrokeType (
+                2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            const float last = modulationHistory.back();
+            graphics.fillEllipse (area.getRight() - 4.0f,
+                                  area.getBottom() - last * area.getHeight() - 4.0f,
+                                  8.0f, 8.0f);
+        }
+
+        static float visualLevel (float level) noexcept
+        {
+            return std::sqrt (juce::jlimit (0.0f, 1.0f, level * 1.6f));
+        }
+
         void timerCallback() override
         {
-            history.pop_front();
-            history.push_back (juce::jlimit (0.0f, 1.0f, source.load (std::memory_order_relaxed)));
+            modulationHistory.pop_front();
+            inputHistory.pop_front();
+            outputHistory.pop_front();
+            modulationHistory.push_back (juce::jlimit (
+                0.0f, 1.0f, modulation.load (std::memory_order_relaxed)));
+            inputHistory.push_back (visualLevel (input.load (std::memory_order_relaxed)));
+            outputHistory.push_back (visualLevel (output.load (std::memory_order_relaxed)));
             repaint();
         }
 
-        std::atomic<float>& source;
+        std::atomic<float>& modulation;
+        std::atomic<float>& input;
+        std::atomic<float>& output;
         juce::Colour accent;
-        std::deque<float> history;
-        bool active = false;
+        std::deque<float> modulationHistory;
+        std::deque<float> inputHistory;
+        std::deque<float> outputHistory;
+        bool modulationActive = false;
     };
 
     //==============================================================================

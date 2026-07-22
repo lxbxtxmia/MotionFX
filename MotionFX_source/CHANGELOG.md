@@ -1,5 +1,18 @@
 # MotionFX changelog
 
+## 0.5.0 - Block 5
+
+- Added a dedicated Filter category with Low Pass, High Pass, Band Pass, Notch, Peak and Comb modes.
+- Added selectable 12, 24, 36 and 48 dB/oct filter slopes.
+- Added live input/output signal traces behind each effect modulation display.
+- Reworked knob interaction: double-click the rotary body to return to zero; double-click the value or label to type a value.
+- Fixed floating-point displays to two decimals and added contextual units such as %, dB, Hz, s and ms.
+- Kept the original visible effect control names, using tooltips for extra context; mode-dependent controls still switch between delay TIME/FEEDBACK and reverb SIZE/DECAY.
+- Added free delay timing displayed as Hz or seconds plus tempo-synchronised musical divisions.
+- Removed the Stutter ALT 1/8 helper and shortened its instruction text.
+- Removed the redundant Open Changelog menu item.
+- Prevented a dragged tab from looking like the currently selected effect.
+
 ## 0.4.0 - Block 4
 
 - Reworked the interface hierarchy so related modulation controls are grouped together.

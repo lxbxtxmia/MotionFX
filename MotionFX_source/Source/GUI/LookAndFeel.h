@@ -29,6 +29,7 @@ namespace mfx
                 case 3: return purple; // Space
                 case 4: return pink;   // Retro
                 case 5: return juce::Colour (0xff6fa8ff); // Width
+                case 6: return juce::Colour (0xff63d471); // Filter
                 default: return teal;
             }
         }

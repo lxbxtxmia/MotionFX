@@ -28,8 +28,9 @@ namespace mfx
         if (defaultStateXml.isEmpty() && apvts != nullptr) defaultStateXml = buildStateXmlString (false);
         applyStateXmlString (defaultStateXml);
         if (orderSetter)
-            orderSetter ({ EffectId::Drive, EffectId::Retro, EffectId::Pan,
-                            EffectId::Width, EffectId::Volume, EffectId::Space });
+            orderSetter ({ EffectId::Drive, EffectId::Retro, EffectId::Filter,
+                            EffectId::Pan, EffectId::Width, EffectId::Volume,
+                            EffectId::Space });
         currentName = "Init";
         currentIndex = 0;
         markCurrentStateClean();

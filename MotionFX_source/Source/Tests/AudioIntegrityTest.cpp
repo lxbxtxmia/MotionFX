@@ -152,7 +152,7 @@ int main()
         ++failures;
     }
 
-    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })
+    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width", "filter" })
     {
         const juce::String prefix (id);
         for (auto* suffix : { "lfo_rateunit", "motion_rateunit", "seq_rateunit" })
@@ -176,9 +176,25 @@ int main()
         ++failures;
     }
 
+    if (proc.apvts.getParameter ("filter_mode") == nullptr
+        || proc.apvts.getParameter ("filter_slope") == nullptr
+        || proc.apvts.getParameter ("filter_resonance") == nullptr)
+    {
+        std::cout << "  [FAIL] Block 5 filter parameters are missing" << std::endl;
+        ++failures;
+    }
+
+    if (proc.apvts.getParameter ("space_delay_synced") == nullptr
+        || proc.apvts.getParameter ("space_delay_rateunit") == nullptr
+        || proc.apvts.getParameter ("space_delay_div") == nullptr)
+    {
+        std::cout << "  [FAIL] Block 5 delay timing parameters are missing" << std::endl;
+        ++failures;
+    }
+
     // Init must be a genuinely clean starting point: every processing module and hidden sync toggle disabled.
     proc.presetManager.loadInitPreset();
-    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })
+    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width", "filter" })
     {
         const juce::String prefix (id);
         for (auto* suffix : { "enabled", "lfo_synced", "motion_synced", "seq_synced" })
@@ -267,7 +283,7 @@ int main()
 
     // 3) extreme parameter stress test -- push every effect to max drive/feedback/depth at once
     std::cout << "-- Extreme parameter stress test" << std::endl;
-    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width" })
+    for (auto* id : { "drive", "pan", "volume", "space", "retro", "width", "filter" })
     {
         juce::String prefix (id);
         if (auto* p = proc.apvts.getParameter (prefix + "_enabled")) p->setValueNotifyingHost (1.0f);

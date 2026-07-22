@@ -15,7 +15,7 @@ namespace mfx
             wetBuffer.setSize (2, maxBlockSize);
             mixSm.reset (sr, 20.0f, 0.0f);
 
-            const int maxDelaySamples = (int) (2.5 * sr);
+            const int maxDelaySamples = (int) (20.0 * sr);
             delayL.prepare ({ sr, (juce::uint32) maxBlockSize, 1 });
             delayR.prepare ({ sr, (juce::uint32) maxBlockSize, 1 });
             delayL.setMaximumDelayInSamples (maxDelaySamples);
@@ -29,34 +29,40 @@ namespace mfx
         void reset() noexcept
         {
             reverb.reset();
-            delayL.reset(); delayR.reset();
+            delayL.reset();
+            delayR.reset();
             fbL = fbR = 0.0f;
             toneStateL = toneStateR = 0.0f;
+            tiltStateL = tiltStateR = 0.0f;
+            gateSm = 0.0f;
         }
 
-        void setMode (SpaceMode m) noexcept { mode = m; }
+        void setMode (SpaceMode newMode) noexcept { mode = newMode; }
 
-        // sizeN: 0..1 -> room size / delay time. decayN: 0..1 -> damping / feedback.
-        // toneN: -1..1 tilts the wet signal darker/brighter.
-        void setParams (float sizeN, float decayN, float toneN) noexcept
+        void setParams (float sizeNormalised, float decayNormalised, float toneNormalised) noexcept
         {
-            sizeParam = juce::jlimit (0.0f, 1.0f, sizeN);
-            decayParam = juce::jlimit (0.0f, 1.0f, decayN);
-            toneParam = juce::jlimit (-1.0f, 1.0f, toneN);
+            sizeParam = juce::jlimit (0.0f, 1.0f, sizeNormalised);
+            decayParam = juce::jlimit (0.0f, 1.0f, decayNormalised);
+            toneParam = juce::jlimit (-1.0f, 1.0f, toneNormalised);
         }
 
-        // mixAmount: 0..1, already modulated by caller -- this is what makes the
-        // space "move" rhythmically when driven by the sequencer/LFO/envelope.
-        void processBlock (juce::AudioBuffer<float>& buf, float mixAmount) noexcept
+        void setDelayTimeSeconds (float seconds) noexcept
         {
-            const int n = buf.getNumSamples();
-            if (buf.getNumChannels() < 2) return;
-            auto* L = buf.getWritePointer (0);
-            auto* R = buf.getWritePointer (1);
+            delayTimeSeconds = juce::jlimit (0.005f, 20.0f, seconds);
+        }
 
-            wetBuffer.setSize (2, n, false, false, true);
-            auto* wL = wetBuffer.getWritePointer (0);
-            auto* wR = wetBuffer.getWritePointer (1);
+        void processBlock (juce::AudioBuffer<float>& buffer, float mixAmount) noexcept
+        {
+            const int numSamples = buffer.getNumSamples();
+            if (buffer.getNumChannels() < 2)
+                return;
+
+            auto* left = buffer.getWritePointer (0);
+            auto* right = buffer.getWritePointer (1);
+
+            wetBuffer.setSize (2, numSamples, false, false, true);
+            auto* wetLeft = wetBuffer.getWritePointer (0);
+            auto* wetRight = wetBuffer.getWritePointer (1);
 
             switch (mode)
             {
@@ -65,42 +71,53 @@ namespace mfx
                 case SpaceMode::GatedReverb:
                 case SpaceMode::Shimmer:
                 {
-                    juce::Reverb::Parameters p;
-                    bool isPlate = (mode == SpaceMode::Plate);
-                    bool isShimmer = (mode == SpaceMode::Shimmer);
-                    p.roomSize = isPlate ? juce::jmap (sizeParam, 0.0f, 1.0f, 0.15f, 0.55f)
-                                         : juce::jmap (sizeParam, 0.0f, 1.0f, 0.3f, 0.98f);
-                    p.damping  = isShimmer ? juce::jmap (decayParam, 0.0f, 1.0f, 0.05f, 0.3f)
-                                           : (1.0f - decayParam) * 0.9f + 0.05f;
-                    p.width = 1.0f;
-                    p.wetLevel = 1.0f; p.dryLevel = 0.0f; // we manage dry/wet ourselves
-                    p.freezeMode = 0.0f;
-                    reverb.setParameters (p);
+                    juce::Reverb::Parameters parameters;
+                    const bool isPlate = mode == SpaceMode::Plate;
+                    const bool isShimmer = mode == SpaceMode::Shimmer;
+                    const float sizeWithDecay = juce::jlimit (
+                        0.0f, 1.0f, sizeParam * 0.65f + decayParam * 0.35f);
 
-                    for (int i = 0; i < n; ++i) { wL[i] = L[i]; wR[i] = R[i]; }
-                    reverb.processStereo (wL, wR, n);
+                    parameters.roomSize = isPlate
+                        ? juce::jmap (sizeWithDecay, 0.0f, 1.0f, 0.15f, 0.65f)
+                        : juce::jmap (sizeWithDecay, 0.0f, 1.0f, 0.3f, 0.99f);
+                    parameters.damping = isShimmer
+                        ? juce::jmap (decayParam, 0.0f, 1.0f, 0.05f, 0.25f)
+                        : juce::jmap (toneParam, -1.0f, 1.0f, 0.9f, 0.08f);
+                    parameters.width = 1.0f;
+                    parameters.wetLevel = 1.0f;
+                    parameters.dryLevel = 0.0f;
+                    parameters.freezeMode = 0.0f;
+                    reverb.setParameters (parameters);
+
+                    for (int sample = 0; sample < numSamples; ++sample)
+                    {
+                        wetLeft[sample] = left[sample];
+                        wetRight[sample] = right[sample];
+                    }
+
+                    reverb.processStereo (wetLeft, wetRight, numSamples);
 
                     if (isShimmer)
                     {
-                        // brightness-boosted sparkle in place of a true pitch shift
-                        // (documented simplification -- see plugin notes).
-                        for (int i = 0; i < n; ++i)
+                        for (int sample = 0; sample < numSamples; ++sample)
                         {
-                            float lp = toneStateL = 0.6f * toneStateL + 0.4f * wL[i];
-                            wL[i] = wL[i] + (wL[i] - lp) * 0.8f;
-                            float lpR = toneStateR = 0.6f * toneStateR + 0.4f * wR[i];
-                            wR[i] = wR[i] + (wR[i] - lpR) * 0.8f;
+                            const float lowLeft = toneStateL = 0.6f * toneStateL + 0.4f * wetLeft[sample];
+                            const float lowRight = toneStateR = 0.6f * toneStateR + 0.4f * wetRight[sample];
+                            wetLeft[sample] += (wetLeft[sample] - lowLeft) * 0.8f;
+                            wetRight[sample] += (wetRight[sample] - lowRight) * 0.8f;
                         }
                     }
 
                     if (mode == SpaceMode::GatedReverb)
                     {
-                        for (int i = 0; i < n; ++i)
+                        for (int sample = 0; sample < numSamples; ++sample)
                         {
-                            float env = gateFollower.processSample (0.5f * (L[i] + R[i]));
-                            float gate = env > 0.08f ? 1.0f : 0.0f;
+                            const float envelope = gateFollower.processSample (
+                                0.5f * (left[sample] + right[sample]));
+                            const float gate = envelope > 0.08f ? 1.0f : 0.0f;
                             gateSm = 0.995f * gateSm + 0.005f * gate;
-                            wL[i] *= gateSm; wR[i] *= gateSm;
+                            wetLeft[sample] *= gateSm;
+                            wetRight[sample] *= gateSm;
                         }
                     }
                     break;
@@ -110,67 +127,72 @@ namespace mfx
                 case SpaceMode::PanDelay:
                 case SpaceMode::TapeDelay:
                 {
-                    float delayMs = juce::jmap (sizeParam, 0.0f, 1.0f, 40.0f, 1200.0f);
-                    float delaySamples = (float) (delayMs * 0.001 * sampleRate);
-                    float feedback = juce::jmap (decayParam, 0.0f, 1.0f, 0.0f, 0.92f);
-                    bool tapeFlavour = (mode == SpaceMode::TapeDelay);
-                    bool pingPong = (mode == SpaceMode::PanDelay);
+                    const float delaySamples = (float) juce::jlimit (
+                        1.0, 20.0 * sampleRate - 2.0, delayTimeSeconds * sampleRate);
+                    const float feedback = juce::jmap (decayParam, 0.0f, 1.0f, 0.0f, 0.94f);
+                    const bool tapeFlavour = mode == SpaceMode::TapeDelay;
+                    const bool pingPong = mode == SpaceMode::PanDelay;
 
                     delayL.setDelay (delaySamples);
-                    delayR.setDelay (pingPong ? delaySamples * 1.5f : delaySamples);
+                    delayR.setDelay (delaySamples);
 
-                    for (int i = 0; i < n; ++i)
+                    for (int sample = 0; sample < numSamples; ++sample)
                     {
-                        float inL = L[i] + (pingPong ? fbR : fbL);
-                        float inR = R[i] + (pingPong ? fbL : fbR);
+                        const float inputLeft = left[sample] + (pingPong ? fbR : fbL);
+                        const float inputRight = right[sample] + (pingPong ? fbL : fbR);
 
-                        delayL.pushSample (0, inL);
-                        delayR.pushSample (0, inR);
-                        float outL = delayL.popSample (0);
-                        float outR = delayR.popSample (0);
+                        delayL.pushSample (0, inputLeft);
+                        delayR.pushSample (0, inputRight);
+                        float outputLeft = delayL.popSample (0);
+                        float outputRight = delayR.popSample (0);
 
                         if (tapeFlavour)
                         {
-                            outL = toneStateL = 0.75f * toneStateL + 0.25f * outL;
-                            outR = toneStateR = 0.75f * toneStateR + 0.25f * outR;
+                            outputLeft = toneStateL = 0.75f * toneStateL + 0.25f * outputLeft;
+                            outputRight = toneStateR = 0.75f * toneStateR + 0.25f * outputRight;
                         }
 
-                        fbL = outL * feedback;
-                        fbR = outR * feedback;
-
-                        wL[i] = outL;
-                        wR[i] = outR;
+                        fbL = outputLeft * feedback;
+                        fbR = outputRight * feedback;
+                        wetLeft[sample] = outputLeft;
+                        wetRight[sample] = outputRight;
                     }
                     break;
                 }
             }
 
-            // tone tilt on the wet signal, then dry/wet blend
-            for (int i = 0; i < n; ++i)
+            for (int sample = 0; sample < numSamples; ++sample)
             {
                 mixSm.setTarget (mixAmount);
-                float m = mixSm.next();
+                const float amount = mixSm.next();
+                float processedLeft = wetLeft[sample];
+                float processedRight = wetRight[sample];
 
-                float wl = wL[i], wr = wR[i];
                 if (toneParam != 0.0f)
                 {
-                    tiltStateL = 0.7f * tiltStateL + 0.3f * wl;
-                    tiltStateR = 0.7f * tiltStateR + 0.3f * wr;
-                    wl = wl + toneParam * (wl - tiltStateL) * 0.5f;
-                    wr = wr + toneParam * (wr - tiltStateR) * 0.5f;
+                    tiltStateL = 0.7f * tiltStateL + 0.3f * processedLeft;
+                    tiltStateR = 0.7f * tiltStateR + 0.3f * processedRight;
+                    processedLeft += toneParam * (processedLeft - tiltStateL) * 0.5f;
+                    processedRight += toneParam * (processedRight - tiltStateR) * 0.5f;
                 }
 
-                L[i] = flushDenorm (L[i] * (1.0f - m) + wl * m);
-                R[i] = flushDenorm (R[i] * (1.0f - m) + wr * m);
+                left[sample] = flushDenorm (left[sample] * (1.0f - amount)
+                                          + processedLeft * amount);
+                right[sample] = flushDenorm (right[sample] * (1.0f - amount)
+                                           + processedRight * amount);
             }
         }
 
     private:
         double sampleRate = 44100.0;
         SpaceMode mode = SpaceMode::Plate;
-        float sizeParam = 0.4f, decayParam = 0.4f, toneParam = 0.0f;
+        float sizeParam = 0.4f;
+        float decayParam = 0.4f;
+        float toneParam = 0.0f;
+        float delayTimeSeconds = 0.5f;
         float gateSm = 0.0f;
-        float fbL = 0.0f, fbR = 0.0f, toneStateL = 0.0f, toneStateR = 0.0f;
+        float fbL = 0.0f, fbR = 0.0f;
+        float toneStateL = 0.0f, toneStateR = 0.0f;
         float tiltStateL = 0.0f, tiltStateR = 0.0f;
 
         juce::Reverb reverb;
