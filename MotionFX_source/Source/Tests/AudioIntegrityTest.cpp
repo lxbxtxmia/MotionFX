@@ -373,9 +373,13 @@ int main()
             ? xml->getChildByName ("FILE_META")
             : nullptr;
 
+        const auto expectedVersion =
+            mfx::PresetManager::getCurrentSoftwareVersion();
+
         if (! saved || metadata == nullptr
             || metadata->getStringAttribute ("creator") != "Unit Tester"
-            || metadata->getStringAttribute ("createdWithVersion") != "0.7.0")
+            || metadata->getStringAttribute ("createdWithVersion")
+                != expectedVersion)
         {
             std::cout << "  [FAIL] Preset creator/version metadata is missing"
                       << std::endl;
@@ -384,8 +388,12 @@ int main()
         else
         {
             auto tooNewText = presetFile.loadFileAsString();
+            const auto currentVersionAttribute =
+                juce::String ("createdWithVersion=\"")
+                + expectedVersion + "\"";
+
             tooNewText = tooNewText.replace (
-                "createdWithVersion=\"0.7.0\"",
+                currentVersionAttribute,
                 "createdWithVersion=\"99.0.0\"");
             presetFile.replaceWithText (tooNewText);
             proc.presetManager.refreshUserPresetList();
