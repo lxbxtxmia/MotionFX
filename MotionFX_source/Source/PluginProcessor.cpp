@@ -70,7 +70,8 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
 
     auto& slot = chain.slots[(size_t) id];
     slot.enabled = raw ("enabled") > 0.5f;
-    slot.base01 = raw ("base") / 100.0f;
+    slot.base01 = raw ("base")
+        / (id == EffectId::Width ? 200.0f : 100.0f);
 
     auto& mod = slot.mod;
     mod.source = (mfx::ModSourceType) (int) raw ("modsource");

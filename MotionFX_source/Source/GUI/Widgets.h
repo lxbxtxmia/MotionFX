@@ -7,63 +7,201 @@
 
 namespace mfx
 {
-    class EditableSlider : public juce::Slider
+    class EditableSlider : public juce::Slider,
+                           public ModulationDisplayProvider
     {
     public:
-        void mouseDoubleClick (const juce::MouseEvent& event) override
+        void setManualEntryCallback (
+            std::function<void()> callback)
         {
-            const auto relativeEvent = event.getEventRelativeTo (this);
-            const int textBoxTop = getHeight() - getTextBoxHeight() - 2;
+            manualEntryCallback = std::move (callback);
+        }
 
-            if (getTextBoxPosition() != juce::Slider::NoTextBox
-                && relativeEvent.position.y >= (float) textBoxTop)
+        void setModulationDisplay (
+            juce::RangedAudioParameter* parameterToUse,
+            std::atomic<float>* currentValue,
+            std::atomic<float>* depthPercent,
+            std::atomic<float>* sourceChoice)
+        {
+            controlledParameter = parameterToUse;
+            currentModulation = currentValue;
+            modulationDepth = depthPercent;
+            modulationSource = sourceChoice;
+            repaint();
+        }
+
+        bool getModulationDisplay (
+            float& minimumNormalised,
+            float& maximumNormalised,
+            float& currentNormalised) const noexcept override
+        {
+            if (controlledParameter == nullptr
+                || currentModulation == nullptr
+                || modulationDepth == nullptr
+                || modulationSource == nullptr
+                || modulationSource->load (
+                       std::memory_order_relaxed) < 0.5f)
             {
-                showTextBox();
+                return false;
+            }
+
+            const float depth = juce::jlimit (
+                0.0f,
+                1.0f,
+                modulationDepth->load (
+                    std::memory_order_relaxed)
+                    / 100.0f);
+
+            if (depth <= 0.0001f)
+                return false;
+
+            const float baseNormalised =
+                controlledParameter->convertTo0to1 (
+                    (float) getValue());
+
+            ValueFormatting::modulationRange (
+                baseNormalised,
+                depth,
+                minimumNormalised,
+                maximumNormalised);
+
+            currentNormalised = juce::jlimit (
+                0.0f,
+                1.0f,
+                currentModulation->load (
+                    std::memory_order_relaxed));
+
+            return true;
+        }
+
+        void mouseDown (
+            const juce::MouseEvent& event) override
+        {
+            if (isTextAreaEvent (event)
+                && manualEntryCallback)
+            {
+                manualEntryCallback();
+            }
+
+            juce::Slider::mouseDown (event);
+        }
+
+        void mouseDoubleClick (
+            const juce::MouseEvent& event) override
+        {
+            if (isTextAreaEvent (event))
+            {
+                if (manualEntryCallback)
+                    manualEntryCallback();
+                else
+                    showTextBox();
+
                 return;
             }
 
-            setValue (0.0, juce::sendNotificationSync);
+            setValue (
+                0.0,
+                juce::sendNotificationSync);
         }
-    };
+
+    private:
+        bool isTextAreaEvent (
+            const juce::MouseEvent& event) const noexcept
+        {
+            if (getTextBoxPosition()
+                == juce::Slider::NoTextBox)
+            {
+                return false;
+            }
+
+            const auto relative =
+                event.getEventRelativeTo (this);
+            const int textBoxTop =
+                getHeight() - getTextBoxHeight() - 3;
+
+            return relative.position.y
+                >= (float) textBoxTop;
+        }
+
+        std::function<void()> manualEntryCallback;
+        juce::RangedAudioParameter* controlledParameter = nullptr;
+        std::atomic<float>* currentModulation = nullptr;
+        std::atomic<float>* modulationDepth = nullptr;
+        std::atomic<float>* modulationSource = nullptr;
+    };;
 
     //==============================================================================
-    class LabeledKnob : public juce::Component
+    class LabeledKnob : public juce::Component,
+                        private juce::Timer
     {
     public:
-        LabeledKnob (juce::AudioProcessorValueTreeState& apvts,
-                     const juce::String& paramId,
-                     const juce::String& labelText,
-                     juce::Colour accent)
+        LabeledKnob (
+            juce::AudioProcessorValueTreeState& apvts,
+            const juce::String& parameterId,
+            const juce::String& labelText,
+            juce::Colour accent)
+            : paramId (parameterId)
         {
-            slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 92, 22);
-            slider.setColour (juce::Slider::rotarySliderFillColourId, accent);
-            slider.setColour (juce::Slider::textBoxTextColourId, Palette::text);
-            slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
-            slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            slider.setSliderStyle (
+                juce::Slider::RotaryHorizontalVerticalDrag);
+            slider.setTextBoxStyle (
+                juce::Slider::TextBoxBelow,
+                false,
+                92,
+                24);
+            slider.setColour (
+                juce::Slider::rotarySliderFillColourId,
+                accent);
+            slider.setColour (
+                juce::Slider::textBoxTextColourId,
+                Palette::text);
+            slider.setColour (
+                juce::Slider::textBoxBackgroundColourId,
+                juce::Colours::transparentBlack);
+            slider.setColour (
+                juce::Slider::textBoxOutlineColourId,
+                juce::Colours::transparentBlack);
+            slider.setManualEntryCallback (
+                [this]
+                {
+                    beginManualEntry();
+                });
+            slider.addMouseListener (this, true);
             addAndMakeVisible (slider);
 
-            label.setText (labelText, juce::dontSendNotification);
-            label.setJustificationType (juce::Justification::centred);
-            label.setColour (juce::Label::textColourId, Palette::textDim);
+            label.setText (
+                labelText,
+                juce::dontSendNotification);
+            label.setJustificationType (
+                juce::Justification::centred);
+            label.setColour (
+                juce::Label::textColourId,
+                Palette::textDim);
             label.addMouseListener (this, false);
             addAndMakeVisible (label);
 
-            auto* parameter = apvts.getParameter (paramId);
-            decimalPlaces = dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr ? 0 : 2;
-            defaultUnitSuffix = inferUnitSuffix (paramId, parameter);
+            parameter = apvts.getParameter (paramId);
+            attachment = std::make_unique<
+                juce::AudioProcessorValueTreeState::SliderAttachment> (
+                    apvts,
+                    paramId,
+                    slider);
 
-            attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-                apvts, paramId, slider);
+            configureDefaultFormatting();
 
-            // SliderAttachment installs parameter formatting. MotionFX formatting is
-            // applied afterwards so values remain compact and include their unit.
-            restoreDefaultFormatter();
-            setTooltipText (labelText
-                            + " - double-click knob for zero; double-click value or label to type");
+            setTooltipText (
+                labelText
+                + " - double-click knob for zero; "
+                  "click the value or double-click the label to type");
         }
 
-        void setCompactLayout (bool shouldBeCompact)
+        ~LabeledKnob() override
+        {
+            stopTimer();
+        }
+
+        void setCompactLayout (
+            bool shouldBeCompact)
         {
             compactLayout = shouldBeCompact;
             resized();
@@ -75,116 +213,451 @@ namespace mfx
 
             if (compactLayout)
             {
-                label.setBounds (bounds.removeFromBottom (14));
+                label.setBounds (
+                    bounds.removeFromBottom (16));
                 slider.setTextBoxStyle (
                     juce::Slider::TextBoxBelow,
                     false,
-                    72,
-                    18);
-                slider.setBounds (bounds.reduced (2, 0));
+                    76,
+                    20);
+                slider.setBounds (
+                    bounds.reduced (2, 0));
                 return;
             }
 
-            label.setBounds (bounds.removeFromBottom (18));
+            label.setBounds (
+                bounds.removeFromBottom (20));
             slider.setTextBoxStyle (
                 juce::Slider::TextBoxBelow,
                 false,
-                92,
-                22);
+                98,
+                24);
             slider.setBounds (bounds);
         }
 
-        void mouseDoubleClick (const juce::MouseEvent& event) override
+        void mouseDown (
+            const juce::MouseEvent& event) override
         {
             if (event.eventComponent == &label)
-                slider.showTextBox();
+                return;
+
+            const auto relative =
+                event.getEventRelativeTo (&slider);
+            const int textBoxTop =
+                slider.getHeight()
+                - slider.getTextBoxHeight()
+                - 3;
+
+            if (relative.position.y
+                >= (float) textBoxTop)
+            {
+                beginManualEntry();
+            }
         }
 
-        void setLabelText (const juce::String& text)
+        void mouseDoubleClick (
+            const juce::MouseEvent& event) override
+        {
+            if (event.eventComponent == &label)
+                beginManualEntry();
+        }
+
+        void setLabelText (
+            const juce::String& text)
         {
             if (label.getText() != text)
-                label.setText (text, juce::dontSendNotification);
+                label.setText (
+                    text,
+                    juce::dontSendNotification);
         }
 
-        void setTooltipText (const juce::String& text)
+        juce::String getLabelText() const
+        {
+            return label.getText();
+        }
+
+        void setTooltipText (
+            const juce::String& text)
         {
             slider.setTooltip (text);
             label.setTooltip (text);
         }
 
-        void setFixedDecimals (int decimals)
+        void setModulationDisplay (
+            std::atomic<float>* currentValue,
+            std::atomic<float>* depthPercent,
+            std::atomic<float>* sourceChoice)
         {
-            decimalPlaces = decimals;
-            restoreDefaultFormatter();
+            slider.setModulationDisplay (
+                parameter,
+                currentValue,
+                depthPercent,
+                sourceChoice);
         }
 
-        void setUnitSuffix (const juce::String& suffix)
+        juce::String getModulationSummary() const
         {
-            installNumericFormatter (decimalPlaces, suffix);
+            float minimum = 0.0f;
+            float maximum = 0.0f;
+            float current = 0.0f;
+
+            if (! slider.getModulationDisplay (
+                    minimum,
+                    maximum,
+                    current))
+            {
+                return "TARGET  "
+                    + label.getText()
+                    + "  -  MOD OFF";
+            }
+
+            return "TARGET  "
+                + label.getText()
+                + "  "
+                + formatNormalised (minimum)
+                + "  >  "
+                + formatNormalised (maximum)
+                + "  -  LIVE "
+                + formatNormalised (current);
+        }
+
+        void setFixedDecimals (int decimals)
+        {
+            detailedDecimals = decimals;
+            const auto suffix = defaultUnitSuffix;
+            setDisplayFunctions (
+                [suffix] (double value)
+                {
+                    if (suffix == " dB")
+                        return ValueFormatting::decibels (value);
+
+                    if (suffix == " %")
+                        return ValueFormatting::percent (
+                            value,
+                            false);
+
+                    return ValueFormatting::compactDecimal (
+                        value,
+                        0)
+                        + suffix;
+                },
+                [decimals, suffix] (double value)
+                {
+                    return juce::String (
+                        value,
+                        decimals)
+                        + suffix;
+                },
+                [] (const juce::String& text)
+                {
+                    return text.getDoubleValue();
+                });
+        }
+
+        void setUnitSuffix (
+            const juce::String& suffix)
+        {
+            defaultUnitSuffix = suffix;
+            setFixedDecimals (detailedDecimals);
         }
 
         void restoreDefaultFormatter()
         {
-            installNumericFormatter (decimalPlaces, defaultUnitSuffix);
+            configureDefaultFormatting();
         }
 
-        void setTextFunctions (std::function<juce::String (double)> formatter,
-                               std::function<double (const juce::String&)> parser)
+        void setTextFunctions (
+            std::function<juce::String (double)> formatter,
+            std::function<double (const juce::String&)> parser)
         {
-            slider.textFromValueFunction = std::move (formatter);
-            slider.valueFromTextFunction = std::move (parser);
-            slider.updateText();
+            setDisplayFunctions (
+                formatter,
+                formatter,
+                parser);
+        }
+
+        void setDisplayFunctions (
+            std::function<juce::String (double)> compact,
+            std::function<juce::String (double)> detailed,
+            std::function<double (const juce::String&)> parser)
+        {
+            compactFormatter = std::move (compact);
+            detailedFormatter = std::move (detailed);
+            valueParser = std::move (parser);
+            applyCompactFormatter();
+        }
+
+        juce::String compactTextForRawValue (
+            double rawValue) const
+        {
+            return compactFormatter
+                ? compactFormatter (rawValue)
+                : juce::String (rawValue);
         }
 
         EditableSlider slider;
 
     private:
-        static juce::String inferUnitSuffix (const juce::String& paramId,
-                                             juce::RangedAudioParameter* parameter)
+        void configureDefaultFormatting()
         {
-            if (paramId.endsWith ("_pitch_grain_ms"))
-                return " ms";
+            detailedDecimals =
+                dynamic_cast<juce::AudioParameterInt*> (
+                    parameter) != nullptr
+                    ? 0
+                    : 2;
 
-            if (dynamic_cast<juce::AudioParameterInt*> (parameter) != nullptr)
+            defaultUnitSuffix =
+                inferUnitSuffix (paramId, parameter);
+
+            if (dynamic_cast<juce::AudioParameterInt*> (
+                    parameter) != nullptr)
+            {
+                setDisplayFunctions (
+                    [] (double value)
+                    {
+                        return juce::String (
+                            (int) std::lround (value));
+                    },
+                    [] (double value)
+                    {
+                        return juce::String (
+                            (int) std::lround (value));
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return text.getDoubleValue();
+                    });
+                return;
+            }
+
+            if (defaultUnitSuffix == " dB")
+            {
+                setDisplayFunctions (
+                    [] (double value)
+                    {
+                        return ValueFormatting::decibels (
+                            value);
+                    },
+                    [] (double value)
+                    {
+                        return ValueFormatting::decibels (
+                            value);
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return text.getDoubleValue();
+                    });
+                return;
+            }
+
+            if (defaultUnitSuffix == " ms")
+            {
+                setDisplayFunctions (
+                    [] (double value)
+                    {
+                        return ValueFormatting::milliseconds (
+                            value,
+                            false);
+                    },
+                    [] (double value)
+                    {
+                        return ValueFormatting::milliseconds (
+                            value,
+                            true);
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return ValueFormatting::parseMilliseconds (
+                            text);
+                    });
+                return;
+            }
+
+            if (defaultUnitSuffix == " Hz")
+            {
+                setDisplayFunctions (
+                    [] (double value)
+                    {
+                        return ValueFormatting::frequencyHz (
+                            value,
+                            false);
+                    },
+                    [] (double value)
+                    {
+                        return ValueFormatting::frequencyHz (
+                            value,
+                            true);
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return ValueFormatting::parseEngineeringValue (
+                            text);
+                    });
+                return;
+            }
+
+            setDisplayFunctions (
+                [] (double value)
+                {
+                    return ValueFormatting::percent (
+                        value,
+                        false);
+                },
+                [] (double value)
+                {
+                    return ValueFormatting::percent (
+                        value,
+                        true);
+                },
+                [] (const juce::String& text)
+                {
+                    return text.getDoubleValue();
+                });
+        }
+
+        static juce::String inferUnitSuffix (
+            const juce::String& parameterId,
+            juce::RangedAudioParameter* parameter)
+        {
+            if (dynamic_cast<juce::AudioParameterInt*> (
+                    parameter) != nullptr)
+            {
                 return {};
+            }
 
-            if (paramId == "master_input" || paramId == "master_output"
-                || paramId == "drive_outtrim")
+            if (parameterId == "master_input"
+                || parameterId == "master_output"
+                || parameterId == "drive_outtrim")
+            {
                 return " dB";
+            }
 
-            if (paramId.endsWith ("_env_attack")
-                || paramId.endsWith ("_env_release")
-                || paramId.endsWith ("_seq_smooth"))
+            if (parameterId.endsWith (
+                    "_pitch_grain_ms")
+                || parameterId.endsWith (
+                    "_env_attack")
+                || parameterId.endsWith (
+                    "_env_release")
+                || parameterId.endsWith (
+                    "_seq_smooth"))
+            {
                 return " ms";
+            }
 
-            if (paramId.endsWith ("_lfo_rate")
-                || paramId.endsWith ("_motion_rate")
-                || paramId.endsWith ("_seq_rate"))
+            if (parameterId.endsWith (
+                    "_lfo_rate")
+                || parameterId.endsWith (
+                    "_motion_rate")
+                || parameterId.endsWith (
+                    "_seq_rate"))
+            {
                 return " Hz";
+            }
 
             return " %";
         }
 
-        void installNumericFormatter (int decimals, const juce::String& suffix)
+        void beginManualEntry()
         {
-            slider.setNumDecimalPlacesToDisplay (decimals);
-            slider.textFromValueFunction = [decimals, suffix] (double value)
+            if (! detailedFormatter)
             {
-                return juce::String (value, decimals) + suffix;
-            };
-            slider.valueFromTextFunction = [] (const juce::String& text)
-            {
-                return text.getDoubleValue();
-            };
+                slider.showTextBox();
+                return;
+            }
+
+            manualEntryActive = true;
+            focusWasSeen = false;
+            manualEntryTicks = 0;
+
+            slider.textFromValueFunction =
+                detailedFormatter;
+            slider.valueFromTextFunction =
+                valueParser;
+            slider.updateText();
+            slider.showTextBox();
+            startTimerHz (30);
+        }
+
+        void applyCompactFormatter()
+        {
+            slider.textFromValueFunction =
+                compactFormatter;
+            slider.valueFromTextFunction =
+                valueParser;
+            slider.setNumDecimalPlacesToDisplay (
+                detailedDecimals);
             slider.updateText();
         }
 
+        void timerCallback() override
+        {
+            if (! manualEntryActive)
+            {
+                stopTimer();
+                return;
+            }
+
+            ++manualEntryTicks;
+
+            const bool directSliderFocus =
+                slider.hasKeyboardFocus (false);
+            const bool sliderOrChildFocus =
+                slider.hasKeyboardFocus (true);
+
+            if (sliderOrChildFocus
+                && ! directSliderFocus)
+            {
+                focusWasSeen = true;
+                return;
+            }
+
+            if ((focusWasSeen
+                 && (directSliderFocus
+                     || ! sliderOrChildFocus))
+                || manualEntryTicks > 12)
+            {
+                manualEntryActive = false;
+                applyCompactFormatter();
+                stopTimer();
+            }
+        }
+
+        juce::String formatNormalised (
+            float normalised) const
+        {
+            if (parameter == nullptr)
+                return {};
+
+            const double raw =
+                parameter->convertFrom0to1 (
+                    juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        normalised));
+
+            return compactTextForRawValue (raw);
+        }
+
         juce::Label label;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+        std::unique_ptr<
+            juce::AudioProcessorValueTreeState::SliderAttachment>
+            attachment;
+        juce::RangedAudioParameter* parameter = nullptr;
+        juce::String paramId;
         juce::String defaultUnitSuffix;
-        int decimalPlaces = 2;
+        int detailedDecimals = 2;
         bool compactLayout = false;
-    };
+        bool manualEntryActive = false;
+        bool focusWasSeen = false;
+        int manualEntryTicks = 0;
+
+        std::function<juce::String (double)>
+            compactFormatter;
+        std::function<juce::String (double)>
+            detailedFormatter;
+        std::function<double (const juce::String&)>
+            valueParser;
+    };;
 
     //==============================================================================
     class LabeledCombo : public juce::Component
@@ -210,7 +683,7 @@ namespace mfx
         {
             auto b = getLocalBounds();
             if (label.getText().isNotEmpty())
-                label.setBounds (b.removeFromTop (16));
+                label.setBounds (b.removeFromTop (19));
             combo.setBounds (b.reduced (0, 1));
         }
 

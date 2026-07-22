@@ -1,5 +1,6 @@
 #pragma once
 #include "Theme.h"
+#include "ValueFormatting.h"
 
 namespace mfx
 {
@@ -55,6 +56,23 @@ namespace mfx
                 : juce::LookAndFeel_V4::getTypefaceForFont (font);
         }
 
+        static float adaptiveCornerRadius (
+            juce::Rectangle<float> bounds) noexcept
+        {
+            const float shortest = juce::jmin (
+                bounds.getWidth(),
+                bounds.getHeight());
+            const float longest = juce::jmax (
+                bounds.getWidth(),
+                bounds.getHeight());
+            const float ratio = longest / juce::jmax (1.0f, shortest);
+
+            if (ratio < 1.28f)
+                return juce::jlimit (3.0f, 4.5f, shortest * 0.11f);
+
+            return juce::jlimit (4.5f, 7.5f, shortest * 0.16f);
+        }
+
         void drawRotarySlider (juce::Graphics& graphics,
                                int x, int y, int width, int height,
                                float sliderPosition,
@@ -88,8 +106,8 @@ namespace mfx
             const bool enhanced =
                 UiPreferences::instance().hasEnhancedControls();
             const float trackThickness = enhanced
-                ? juce::jmax (3.0f, radius * 0.15f)
-                : juce::jmax (2.0f, radius * 0.10f);
+                ? juce::jmax (3.4f, radius * 0.15f)
+                : juce::jmax (2.4f, radius * 0.10f);
 
             juce::Path track;
             track.addCentredArc (
@@ -128,6 +146,73 @@ namespace mfx
                     trackThickness,
                     juce::PathStrokeType::curved,
                     juce::PathStrokeType::rounded));
+
+            if (auto* provider =
+                    dynamic_cast<ModulationDisplayProvider*> (&slider))
+            {
+                float minimum = 0.0f;
+                float maximum = 0.0f;
+                float current = 0.0f;
+
+                if (provider->getModulationDisplay (
+                        minimum, maximum, current))
+                {
+                    const float minimumAngle = rotaryStartAngle
+                        + minimum
+                            * (rotaryEndAngle - rotaryStartAngle);
+                    const float maximumAngle = rotaryStartAngle
+                        + maximum
+                            * (rotaryEndAngle - rotaryStartAngle);
+                    const float currentAngle = rotaryStartAngle
+                        + current
+                            * (rotaryEndAngle - rotaryStartAngle);
+
+                    juce::Path rangeArc;
+                    const float rangeRadius =
+                        radius + (enhanced ? 1.2f : 0.5f);
+
+                    rangeArc.addCentredArc (
+                        centre.x,
+                        centre.y,
+                        rangeRadius,
+                        rangeRadius,
+                        0.0f,
+                        minimumAngle,
+                        maximumAngle,
+                        true);
+
+                    graphics.setColour (
+                        accent.withAlpha (
+                            enhanced ? 0.46f : 0.32f));
+                    graphics.strokePath (
+                        rangeArc,
+                        juce::PathStrokeType (
+                            enhanced ? 2.6f : 1.8f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+
+                    const auto marker = centre
+                        + juce::Point<float> (
+                            std::sin (currentAngle),
+                            -std::cos (currentAngle))
+                          * rangeRadius;
+
+                    graphics.setColour (
+                        Palette::text.withAlpha (0.92f));
+                    graphics.fillEllipse (
+                        marker.x - 2.4f,
+                        marker.y - 2.4f,
+                        4.8f,
+                        4.8f);
+                    graphics.setColour (accent);
+                    graphics.drawEllipse (
+                        marker.x - 2.4f,
+                        marker.y - 2.4f,
+                        4.8f,
+                        4.8f,
+                        1.0f);
+                }
+            }
 
             const float bodyRadius = radius
                 - trackThickness
@@ -168,10 +253,11 @@ namespace mfx
 
             if (slider.hasKeyboardFocus (true))
             {
-                graphics.setColour (Palette::text.withAlpha (0.85f));
+                graphics.setColour (
+                    Palette::text.withAlpha (0.90f));
                 graphics.drawEllipse (
                     bounds.expanded (2.0f),
-                    enhanced ? 2.0f : 1.0f);
+                    enhanced ? 2.0f : 1.2f);
             }
         }
 
@@ -181,20 +267,19 @@ namespace mfx
                                bool buttonDown) override
         {
             juce::ignoreUnused (buttonDown);
-            auto bounds = button.getLocalBounds()
-                                .toFloat()
-                                .reduced (1.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced (1.0f);
+            const float radius = adaptiveCornerRadius (bounds);
 
             const bool pillStyle = button.getButtonText().isEmpty();
 
             if (pillStyle)
             {
-                const float radius = bounds.getHeight() * 0.5f;
+                const float pillRadius = bounds.getHeight() * 0.5f;
                 graphics.setColour (
                     button.getToggleState()
                         ? Palette::teal
                         : Palette::stroke);
-                graphics.fillRoundedRectangle (bounds, radius);
+                graphics.fillRoundedRectangle (bounds, pillRadius);
 
                 const float diameter = bounds.getHeight() - 4.0f;
                 const float knobX = button.getToggleState()
@@ -215,7 +300,7 @@ namespace mfx
 
             graphics.setColour (
                 highlighted ? Palette::panelHi : Palette::panel);
-            graphics.fillRoundedRectangle (bounds, 6.0f);
+            graphics.fillRoundedRectangle (bounds, radius);
 
             graphics.setColour (
                 button.getToggleState()
@@ -223,7 +308,7 @@ namespace mfx
                     : Palette::stroke);
             graphics.drawRoundedRectangle (
                 bounds,
-                6.0f,
+                radius,
                 button.getToggleState() ? 1.8f : 1.0f);
 
             graphics.setColour (
@@ -232,9 +317,9 @@ namespace mfx
                     : Palette::textDim);
 
             const float fontSize = juce::jlimit (
-                9.5f,
-                13.0f,
-                bounds.getHeight() * 0.31f);
+                11.0f,
+                14.5f,
+                bounds.getHeight() * 0.36f);
 
             graphics.setFont (FontBank::font (fontSize, true));
             graphics.drawFittedText (
@@ -242,7 +327,7 @@ namespace mfx
                 bounds.reduced (7.0f, 3.0f).toNearestInt(),
                 juce::Justification::centred,
                 1,
-                0.78f);
+                0.82f);
         }
 
         void drawButtonBackground (
@@ -252,9 +337,8 @@ namespace mfx
             bool highlighted,
             bool down) override
         {
-            auto bounds = button.getLocalBounds()
-                                .toFloat()
-                                .reduced (1.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced (1.0f);
+            const float radius = adaptiveCornerRadius (bounds);
 
             const auto base = down
                 ? Palette::panelHi.brighter (
@@ -264,7 +348,7 @@ namespace mfx
                     : Palette::panel;
 
             graphics.setColour (base);
-            graphics.fillRoundedRectangle (bounds, 6.0f);
+            graphics.fillRoundedRectangle (bounds, radius);
 
             graphics.setColour (
                 button.hasKeyboardFocus (true)
@@ -272,7 +356,7 @@ namespace mfx
                     : Palette::stroke);
             graphics.drawRoundedRectangle (
                 bounds,
-                6.0f,
+                radius,
                 button.hasKeyboardFocus (true) ? 1.8f : 1.0f);
         }
 
@@ -288,9 +372,10 @@ namespace mfx
                               (float) width,
                               (float) height)
                               .reduced (1.0f);
+            const float radius = adaptiveCornerRadius (bounds);
 
             graphics.setColour (Palette::panel);
-            graphics.fillRoundedRectangle (bounds, 6.0f);
+            graphics.fillRoundedRectangle (bounds, radius);
 
             graphics.setColour (
                 box.hasKeyboardFocus (true)
@@ -298,7 +383,7 @@ namespace mfx
                     : Palette::stroke);
             graphics.drawRoundedRectangle (
                 bounds,
-                6.0f,
+                radius,
                 box.hasKeyboardFocus (true) ? 1.8f : 1.0f);
 
             juce::Path arrow;
@@ -317,10 +402,10 @@ namespace mfx
         {
             const float requested = label.getFont().getHeight();
             const float maximum = juce::jmax (
-                10.0f,
-                label.getHeight() * 0.50f);
+                12.0f,
+                label.getHeight() * 0.56f);
             const float height = juce::jlimit (
-                9.5f,
+                11.5f,
                 maximum,
                 requested);
 
@@ -334,14 +419,14 @@ namespace mfx
         {
             return FontBank::font (
                 juce::jlimit (
-                    12.0f,
-                    16.0f,
-                    box.getHeight() * 0.40f));
+                    13.5f,
+                    17.5f,
+                    box.getHeight() * 0.43f));
         }
 
         juce::Font getPopupMenuFont() override
         {
-            return FontBank::font (13.5f);
+            return FontBank::font (15.0f);
         }
 
         juce::Font getTextButtonFont (
@@ -350,14 +435,14 @@ namespace mfx
         {
             const float maximum =
                 button.getButtonText().length() >= 10
-                    ? 11.5f
-                    : 14.0f;
+                    ? 13.0f
+                    : 15.5f;
 
             return FontBank::font (
                 juce::jlimit (
-                    9.5f,
+                    11.5f,
                     maximum,
-                    buttonHeight * 0.36f),
+                    buttonHeight * 0.40f),
                 false);
         }
 

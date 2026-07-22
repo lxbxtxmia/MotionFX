@@ -45,7 +45,7 @@ namespace mfx
             graphics.setColour (
                 isEnabled()
                     ? Palette::text
-                    : Palette::textDim.withAlpha (0.45f));
+                    : Palette::textDim.withAlpha (0.48f));
 
             juce::Path path;
 
@@ -79,46 +79,60 @@ namespace mfx
                 case HeaderIcon::Redo:
                 {
                     const bool redo = icon == HeaderIcon::Redo;
-                    const float direction = redo ? 1.0f : -1.0f;
-                    const float startX = redo
-                        ? bounds.getX() + 2.0f
-                        : bounds.getRight() - 2.0f;
-                    const float endX = redo
+                    const float headX = redo
                         ? bounds.getRight() - 2.0f
                         : bounds.getX() + 2.0f;
+                    const float headY = bounds.getCentreY() - 1.0f;
+                    const float direction = redo ? 1.0f : -1.0f;
 
-                    path.startNewSubPath (
-                        startX,
+                    juce::Path curve;
+                    const float curveStartX =
+                        headX - direction * 4.5f;
+                    const float tailX = redo
+                        ? bounds.getX() + 2.0f
+                        : bounds.getRight() - 2.0f;
+
+                    curve.startNewSubPath (
+                        curveStartX,
+                        headY);
+                    curve.cubicTo (
+                        curveStartX - direction * bounds.getWidth() * 0.16f,
+                        bounds.getY() + 1.5f,
+                        tailX,
+                        bounds.getY() + 2.0f,
+                        tailX,
                         bounds.getBottom() - 2.0f);
-                    path.cubicTo (
-                        startX,
-                        bounds.getY() + 2.0f,
-                        endX - direction * bounds.getWidth() * 0.22f,
-                        bounds.getY() + 2.0f,
-                        endX,
-                        bounds.getCentreY());
-
-                    juce::Path arrow;
-                    arrow.startNewSubPath (
-                        endX - direction * 5.0f,
-                        bounds.getCentreY() - 5.0f);
-                    arrow.lineTo (endX, bounds.getCentreY());
-                    arrow.lineTo (
-                        endX - direction * 5.0f,
-                        bounds.getCentreY() + 5.0f);
 
                     graphics.strokePath (
-                        path,
+                        curve,
                         juce::PathStrokeType (
-                            2.0f,
+                            2.2f,
                             juce::PathStrokeType::curved,
                             juce::PathStrokeType::rounded));
-                    graphics.strokePath (
-                        arrow,
-                        juce::PathStrokeType (
-                            2.0f,
-                            juce::PathStrokeType::curved,
-                            juce::PathStrokeType::rounded));
+
+                    juce::Path arrowHead;
+                    if (redo)
+                    {
+                        arrowHead.addTriangle (
+                            headX,
+                            headY,
+                            headX - 7.0f,
+                            headY - 5.2f,
+                            headX - 7.0f,
+                            headY + 5.2f);
+                    }
+                    else
+                    {
+                        arrowHead.addTriangle (
+                            headX,
+                            headY,
+                            headX + 7.0f,
+                            headY - 5.2f,
+                            headX + 7.0f,
+                            headY + 5.2f);
+                    }
+
+                    graphics.fillPath (arrowHead);
                     return;
                 }
 
@@ -128,7 +142,7 @@ namespace mfx
                     graphics.drawRoundedRectangle (
                         disk,
                         2.0f,
-                        1.7f);
+                        1.8f);
                     graphics.fillRect (
                         disk.getX() + disk.getWidth() * 0.22f,
                         disk.getY(),
@@ -143,7 +157,7 @@ namespace mfx
                     graphics.setColour (
                         isEnabled()
                             ? Palette::text
-                            : Palette::textDim.withAlpha (0.45f));
+                            : Palette::textDim.withAlpha (0.48f));
                     graphics.drawRoundedRectangle (
                         disk.reduced (
                             disk.getWidth() * 0.20f,
@@ -152,7 +166,7 @@ namespace mfx
                                 0.0f,
                                 disk.getHeight() * 0.25f),
                         1.5f,
-                        1.4f);
+                        1.5f);
                     return;
                 }
 
@@ -177,6 +191,7 @@ namespace mfx
                                 std::cos (angle),
                                 std::sin (angle))
                               * outer;
+
                         graphics.drawLine (
                             juce::Line<float> (start, end),
                             2.0f);
@@ -187,7 +202,7 @@ namespace mfx
                         centre.y - outer * 0.66f,
                         outer * 1.32f,
                         outer * 1.32f,
-                        1.7f);
+                        1.8f);
                     graphics.fillEllipse (
                         centre.x - inner,
                         centre.y - inner,
@@ -200,7 +215,7 @@ namespace mfx
             graphics.strokePath (
                 path,
                 juce::PathStrokeType (
-                    2.2f,
+                    2.3f,
                     juce::PathStrokeType::curved,
                     juce::PathStrokeType::rounded));
         }
@@ -225,40 +240,36 @@ namespace mfx
                 std::memory_order_relaxed);
             setTooltip (
                 "Post-effect stereo peak meter. "
-                "Green: below -6 dBFS, yellow: -6 to 0 dBFS, "
-                "red: above 0 dBFS before the safety ceiling.");
+                "Green below -6 dBFS, yellow from -6 to 0 dBFS, "
+                "red above 0 dBFS before the safety ceiling.");
             startTimerHz (30);
         }
 
         void paint (juce::Graphics& graphics) override
         {
             auto bounds = getLocalBounds().toFloat();
+            auto labelArea = bounds.removeFromBottom (13.0f);
+            bounds = bounds.reduced (2.0f, 1.0f);
 
-            graphics.setColour (Palette::bg1);
-            graphics.fillRoundedRectangle (bounds, 5.0f);
-            graphics.setColour (Palette::stroke);
-            graphics.drawRoundedRectangle (
-                bounds.reduced (0.5f),
-                5.0f,
-                1.0f);
-
-            bounds = bounds.reduced (6.0f, 5.0f);
-            auto labelArea = bounds.removeFromBottom (12.0f);
-            const float gap = 4.0f;
+            const float gap = 5.0f;
             const float barWidth =
                 (bounds.getWidth() - gap) * 0.5f;
 
-            const auto leftBar = bounds.removeFromLeft (barWidth);
+            const auto leftBar =
+                bounds.removeFromLeft (barWidth);
             bounds.removeFromLeft (gap);
             const auto rightBar = bounds;
 
             drawBar (graphics, leftBar, displayedLeftDb);
             drawBar (graphics, rightBar, displayedRightDb);
 
-            graphics.setFont (FontBank::font (8.5f, true));
+            graphics.setFont (FontBank::font (9.5f, true));
             graphics.setColour (Palette::textDim);
-            auto leftLabel = labelArea.removeFromLeft (barWidth);
+
+            auto leftLabel =
+                labelArea.removeFromLeft (barWidth);
             labelArea.removeFromLeft (gap);
+
             graphics.drawText (
                 "L",
                 leftLabel.toNearestInt(),
@@ -277,8 +288,9 @@ namespace mfx
                 -60.0f);
         }
 
-        static float dbToY (float db,
-                            juce::Rectangle<float> area) noexcept
+        static float dbToY (
+            float db,
+            juce::Rectangle<float> area) noexcept
         {
             const float normalised = juce::jmap (
                 juce::jlimit (-60.0f, 6.0f, db),
@@ -286,35 +298,9 @@ namespace mfx
                 6.0f,
                 0.0f,
                 1.0f);
+
             return area.getBottom()
                 - normalised * area.getHeight();
-        }
-
-        static void fillDbRange (
-            juce::Graphics& graphics,
-            juce::Rectangle<float> area,
-            float visibleDb,
-            float rangeBottomDb,
-            float rangeTopDb,
-            juce::Colour colour)
-        {
-            if (visibleDb <= rangeBottomDb)
-                return;
-
-            const float clippedTop = juce::jmin (
-                visibleDb,
-                rangeTopDb);
-            const float topY = dbToY (clippedTop, area);
-            const float bottomY = dbToY (
-                rangeBottomDb,
-                area);
-
-            graphics.setColour (colour);
-            graphics.fillRoundedRectangle (
-                area.withY (topY)
-                    .withHeight (
-                        juce::jmax (0.0f, bottomY - topY)),
-                1.5f);
         }
 
         static void drawBar (
@@ -322,48 +308,47 @@ namespace mfx
             juce::Rectangle<float> area,
             float db)
         {
-            graphics.setColour (Palette::panel);
-            graphics.fillRoundedRectangle (area, 2.0f);
+            graphics.setColour (
+                Palette::panel.withAlpha (0.82f));
+            graphics.fillRect (area);
 
-            fillDbRange (
-                graphics,
-                area,
-                db,
-                -60.0f,
-                -6.0f,
-                juce::Colour (0xff52d273));
-            fillDbRange (
-                graphics,
-                area,
-                db,
-                -6.0f,
-                0.0f,
-                juce::Colour (0xffffd166));
-            fillDbRange (
-                graphics,
-                area,
-                db,
-                0.0f,
-                6.0f,
-                juce::Colour (0xffff5a5a));
+            const float top = dbToY (db, area);
+            auto fillArea = area.withY (top)
+                                .withHeight (
+                                    juce::jmax (
+                                        0.0f,
+                                        area.getBottom() - top));
+
+            if (! fillArea.isEmpty())
+            {
+                juce::ColourGradient gradient (
+                    juce::Colour (0xff55d679),
+                    area.getCentreX(),
+                    area.getBottom(),
+                    juce::Colour (0xffff5a5a),
+                    area.getCentreX(),
+                    area.getY(),
+                    false);
+
+                const float yellowPosition =
+                    (-6.0f + 60.0f) / 66.0f;
+                const float zeroPosition =
+                    (0.0f + 60.0f) / 66.0f;
+
+                gradient.addColour (
+                    yellowPosition,
+                    juce::Colour (0xffffd166));
+                gradient.addColour (
+                    zeroPosition,
+                    juce::Colour (0xffffb347));
+
+                graphics.setGradientFill (gradient);
+                graphics.fillRect (fillArea);
+            }
 
             graphics.setColour (
-                Palette::stroke.withAlpha (0.78f));
-            graphics.drawRoundedRectangle (
-                area,
-                2.0f,
-                1.0f);
-
-            graphics.setColour (
-                Palette::text.withAlpha (0.36f));
-            graphics.drawHorizontalLine (
-                (int) dbToY (-6.0f, area),
-                area.getX(),
-                area.getRight());
-            graphics.drawHorizontalLine (
-                (int) dbToY (0.0f, area),
-                area.getX(),
-                area.getRight());
+                Palette::stroke.withAlpha (0.90f));
+            graphics.drawRect (area, 1.0f);
         }
 
         static float smoothMeter (
@@ -377,7 +362,10 @@ namespace mfx
                 UiPreferences::instance().isReducedMotion()
                     ? 2.8f
                     : 1.2f;
-            return juce::jmax (-60.0f, current - fallPerTick);
+
+            return juce::jmax (
+                -60.0f,
+                current - fallPerTick);
         }
 
         void timerCallback() override

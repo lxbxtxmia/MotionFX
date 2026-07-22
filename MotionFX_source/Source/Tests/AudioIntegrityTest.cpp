@@ -1,5 +1,6 @@
 #include "../PluginProcessor.h"
 #include "../FactoryPresets.h"
+#include "../GUI/ValueFormatting.h"
 #include <iostream>
 #include <cmath>
 
@@ -134,6 +135,59 @@ int main()
     int numFactory = proc.presetManager.getNumFactoryPresets();
     std::cout << "Factory presets found: " << numFactory << " (expect 16)" << std::endl;
     if (numFactory != 16) { std::cout << "  [FAIL] preset count mismatch" << std::endl; ++failures; }
+
+    // Block 0.8.1 compact display and parameter-range checks.
+    if (mfx::ValueFormatting::frequencyHz (20000.0, false)
+            != "20.0 kHz"
+        || mfx::ValueFormatting::frequencyHz (100.0, false)
+            != "100 Hz"
+        || mfx::ValueFormatting::pan (50.0, false) != "C"
+        || mfx::ValueFormatting::pan (0.0, false) != "50L"
+        || mfx::ValueFormatting::pan (100.0, false) != "50R")
+    {
+        std::cout << "  [FAIL] Block 0.8.1 compact value formatting is incorrect"
+                  << std::endl;
+        ++failures;
+    }
+
+    if (auto* width = proc.apvts.getParameter ("width_base"))
+    {
+        if (std::abs (width->convertFrom0to1 (1.0f) - 200.0f) > 0.001f
+            || std::abs (width->convertFrom0to1 (0.5f) - 100.0f) > 0.001f)
+        {
+            std::cout << "  [FAIL] Width parameter is not mapped from 0 to 200%"
+                      << std::endl;
+            ++failures;
+        }
+    }
+    else
+    {
+        std::cout << "  [FAIL] Width base parameter is missing" << std::endl;
+        ++failures;
+    }
+
+    float modulationMinimum = 0.0f;
+    float modulationMaximum = 0.0f;
+    mfx::ValueFormatting::modulationRange (
+        0.5f, 0.4f, modulationMinimum, modulationMaximum);
+
+    if (std::abs (modulationMinimum - 0.3f) > 0.0001f
+        || std::abs (modulationMaximum - 0.7f) > 0.0001f)
+    {
+        std::cout << "  [FAIL] Modulation range display calculation is incorrect"
+                  << std::endl;
+        ++failures;
+    }
+
+    if (std::abs (mfx::RetroEffect::lossyBandwidthHz (1.0f) - 18000.0f) > 0.01f
+        || std::abs (mfx::RetroEffect::wearRateHz (1.0f) - 4.6f) > 0.001f
+        || std::abs (mfx::RetroEffect::emuFilterHz (0.0f) - 3000.0f) > 0.01f)
+    {
+        std::cout << "  [FAIL] Retro contextual units do not match DSP mappings"
+                  << std::endl;
+        ++failures;
+    }
+
 
 
     // Block 4 timing choices and absolute Stutter repeat lengths.

@@ -25,6 +25,10 @@ namespace mfx
             enableToggle = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_enabled", "ON");
             modeCombo = std::make_unique<LabeledCombo> (apvts, theSpec.modeParamId, "MODE");
             primaryKnob = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_base", "AMOUNT", theSpec.accent);
+            primaryKnob->setModulationDisplay (
+                &chain.uiModValue[(size_t) id],
+                apvts.getRawParameterValue (theSpec.prefix + "_moddepth"),
+                apvts.getRawParameterValue (theSpec.prefix + "_modsource"));
             addAndMakeVisible (*enableToggle);
             addAndMakeVisible (*modeCombo);
             addAndMakeVisible (*primaryKnob);
@@ -48,6 +52,12 @@ namespace mfx
             modDepthKnob = std::make_unique<LabeledKnob> (apvts, theSpec.prefix + "_moddepth", "DEPTH", theSpec.accent);
             addAndMakeVisible (*modSourceCombo);
             addAndMakeVisible (*modDepthKnob);
+
+            modTargetLabel.setJustificationType (juce::Justification::centredLeft);
+            modTargetLabel.setColour (juce::Label::textColourId, theSpec.accent);
+            modTargetLabel.setFont (FontBank::font (10.5f, true));
+            modTargetLabel.setMinimumHorizontalScale (0.78f);
+            addAndMakeVisible (modTargetLabel);
 
             lfoShape = std::make_unique<LabeledCombo> (apvts, theSpec.prefix + "_lfo_shape", "SHAPE");
             lfoSynced = std::make_unique<LabeledToggle> (apvts, theSpec.prefix + "_lfo_synced", "TEMPO SYNC");
@@ -95,15 +105,28 @@ namespace mfx
             {
                 filterSlope = std::make_unique<LabeledCombo> (apvts, "filter_slope", "SLOPE");
                 addAndMakeVisible (*filterSlope);
-                primaryKnob->setTextFunctions (
-                    [] (double percent) { return juce::String (filterHzFromPercent (percent), 2) + " Hz"; },
-                    [] (const juce::String& text) { return percentFromFilterHz (text.getDoubleValue()); });
+                primaryKnob->setDisplayFunctions (
+                    [] (double percent)
+                    {
+                        return ValueFormatting::frequencyHz (
+                            filterHzFromPercent (percent), false);
+                    },
+                    [] (double percent)
+                    {
+                        return ValueFormatting::frequencyHz (
+                            filterHzFromPercent (percent), true);
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return percentFromFilterHz (
+                            ValueFormatting::parseEngineeringValue (text));
+                    });
                 primaryKnob->setLabelText ("CUTOFF");
                 primaryKnob->setTooltipText ("Filter cutoff frequency - type a value in Hz");
             }
 
             applyStaticContext();
-            startTimerHz (15);
+            startTimerHz (20);
             refreshModContextVisibility();
             refreshEffectContext (true);
         }
@@ -144,6 +167,26 @@ namespace mfx
             const double clamped = juce::jlimit (20.0, 20000.0, hz);
             return 100.0 * std::log (clamped / 20.0) / std::log (1000.0);
         }
+        static double widthCrossoverHzFromPercent (double percent)
+        {
+            return juce::jmap (
+                juce::jlimit (0.0, 100.0, percent),
+                0.0,
+                100.0,
+                80.0,
+                400.0);
+        }
+
+        static double percentFromWidthCrossoverHz (double hz)
+        {
+            return juce::jmap (
+                juce::jlimit (80.0, 400.0, hz),
+                80.0,
+                400.0,
+                0.0,
+                100.0);
+        }
+
 
         static double delayRateHzFromPercent (double percent)
         {
@@ -163,45 +206,154 @@ namespace mfx
 
         void applyStaticContext()
         {
-            // Keep the original visible control names. Extra context belongs in
-            // tooltips; only controls whose actual function changes with the mode
-            // (for example Space SIZE -> TIME) change their displayed name.
             switch (id)
             {
                 case EffectId::Drive:
-                    primaryKnob->setTooltipText ("Drive amount");
+                    primaryKnob->setTooltipText (
+                        "Drive amount");
                     break;
+
                 case EffectId::Pan:
-                    primaryKnob->setTooltipText ("Pan amount");
+                    primaryKnob->setLabelText ("PAN");
+                    primaryKnob->setTooltipText (
+                        "Stereo position: 50L through C to 50R");
+                    primaryKnob->setDisplayFunctions (
+                        [] (double value)
+                        {
+                            return ValueFormatting::pan (
+                                value,
+                                false);
+                        },
+                        [] (double value)
+                        {
+                            return ValueFormatting::pan (
+                                value,
+                                true);
+                        },
+                        [] (const juce::String& text)
+                        {
+                            return ValueFormatting::parsePan (
+                                text);
+                        });
                     break;
+
                 case EffectId::Volume:
-                    primaryKnob->setTooltipText ("Volume amount");
+                    primaryKnob->setTooltipText (
+                        "Volume amount");
                     break;
+
                 case EffectId::Space:
-                    primaryKnob->setTooltipText ("Space wet amount");
+                    primaryKnob->setTooltipText (
+                        "Space wet amount");
                     break;
+
                 case EffectId::Retro:
-                    primaryKnob->setTooltipText ("Retro amount");
+                    primaryKnob->setTooltipText (
+                        "Retro effect amount");
                     break;
+
                 case EffectId::Width:
-                    primaryKnob->setTooltipText ("Width amount");
+                    primaryKnob->setLabelText ("WIDTH");
+                    primaryKnob->setTooltipText (
+                        "Stereo width: 0% mono, 100% original stereo, 200% maximum side signal");
+                    primaryKnob->setDisplayFunctions (
+                        [] (double value)
+                        {
+                            return ValueFormatting::percent (
+                                value,
+                                false);
+                        },
+                        [] (double value)
+                        {
+                            return ValueFormatting::percent (
+                                value,
+                                true);
+                        },
+                        [] (const juce::String& text)
+                        {
+                            return juce::jlimit (
+                                0.0,
+                                200.0,
+                                text.getDoubleValue());
+                        });
+
+                    if (! secondaryKnobs.empty())
+                    {
+                        secondaryKnobs[0]->setTooltipText (
+                            "Mono-bass crossover frequency");
+                        secondaryKnobs[0]->setDisplayFunctions (
+                            [] (double percent)
+                            {
+                                return ValueFormatting::frequencyHz (
+                                    widthCrossoverHzFromPercent (
+                                        percent),
+                                    false);
+                            },
+                            [] (double percent)
+                            {
+                                return ValueFormatting::frequencyHz (
+                                    widthCrossoverHzFromPercent (
+                                        percent),
+                                    true);
+                            },
+                            [] (const juce::String& text)
+                            {
+                                return percentFromWidthCrossoverHz (
+                                    ValueFormatting::parseEngineeringValue (
+                                        text));
+                            });
+                    }
                     break;
+
                 case EffectId::Filter:
                     break;
             }
         }
 
-        static void setRateValueUnit (LabeledKnob& knob, int unitIndex)
+        static void setRateValueUnit (
+            LabeledKnob& knob,
+            int unitIndex)
         {
-            const juce::String suffix = unitIndex == 1 ? " s" : " Hz";
-            knob.setTextFunctions (
-                [suffix] (double value)
+            if (unitIndex == 1)
+            {
+                knob.setDisplayFunctions (
+                    [] (double value)
+                    {
+                        return ValueFormatting::seconds (
+                            value,
+                            false);
+                    },
+                    [] (double value)
+                    {
+                        return ValueFormatting::seconds (
+                            value,
+                            true);
+                    },
+                    [] (const juce::String& text)
+                    {
+                        return ValueFormatting::parseSeconds (
+                            text);
+                    });
+                return;
+            }
+
+            knob.setDisplayFunctions (
+                [] (double value)
                 {
-                    return juce::String (value, 2) + suffix;
+                    return ValueFormatting::frequencyHz (
+                        value,
+                        false);
+                },
+                [] (double value)
+                {
+                    return ValueFormatting::frequencyHz (
+                        value,
+                        true);
                 },
                 [] (const juce::String& text)
                 {
-                    return text.getDoubleValue();
+                    return ValueFormatting::parseEngineeringValue (
+                        text);
                 });
         }
 
@@ -221,14 +373,20 @@ namespace mfx
             lastRateUnitKey = key;
         }
 
-        void layoutModulationPanel (juce::Rectangle<int> area)
+        void layoutModulationPanel (
+            juce::Rectangle<int> area)
         {
-            auto sourceRow = area.removeFromTop (118);
-            auto depthArea = sourceRow.removeFromRight (112);
+            auto sourceRow = area.removeFromTop (104);
+            auto depthArea =
+                sourceRow.removeFromRight (112);
             modDepthKnob->setBounds (depthArea);
             sourceRow.removeFromRight (10);
-            modSourceCombo->setBounds (sourceRow.removeFromTop (58));
-            area.removeFromTop (8);
+            modSourceCombo->setBounds (
+                sourceRow.removeFromTop (60));
+
+            modTargetLabel.setBounds (
+                area.removeFromTop (25));
+            area.removeFromTop (7);
 
             layoutLfo (area);
             layoutEnvelopeFollower (area);
@@ -331,7 +489,7 @@ namespace mfx
 
             area.removeFromTop (10);
             visualizer->setBounds (area.removeFromTop (
-                juce::jlimit (190, 235, (int) (area.getHeight() * 0.48f))));
+                juce::jlimit (175, 210, (int) (area.getHeight() * 0.43f))));
             area.removeFromTop (12);
 
             std::vector<LabeledKnob*> knobs;
@@ -342,12 +500,12 @@ namespace mfx
                     knobs.push_back (knob.get());
 
             constexpr int knobWidth = 126;
-            constexpr int knobHeight = 138;
+            constexpr int knobHeight = 144;
             constexpr int gap = 16;
             const int count = (int) knobs.size();
             const int totalWidth = count * knobWidth + juce::jmax (0, count - 1) * gap;
             int x = area.getX() + juce::jmax (0, (area.getWidth() - totalWidth) / 2);
-            const int y = area.getY() + juce::jmax (0, (area.getHeight() - knobHeight) / 2);
+            const int y = area.getY() + juce::jmax (0, (area.getHeight() - knobHeight) / 3);
 
             for (auto* knob : knobs)
             {
@@ -374,6 +532,27 @@ namespace mfx
         {
             refreshModContextVisibility();
             refreshEffectContext (false);
+            refreshModTargetText();
+            primaryKnob->slider.repaint();
+        }
+
+        void refreshModTargetText()
+        {
+            const auto summary =
+                primaryKnob->getModulationSummary();
+
+            if (modTargetLabel.getText() != summary)
+            {
+                modTargetLabel.setText (
+                    summary,
+                    juce::dontSendNotification);
+            }
+
+            modTargetLabel.setTooltip (
+                "The outer arc on "
+                + primaryKnob->getLabelText()
+                + " shows the full modulation range. "
+                  "The bright dot shows the live value.");
         }
 
         void refreshEffectContext (bool force)
@@ -382,51 +561,108 @@ namespace mfx
 
             if (id == EffectId::Space)
             {
-                const int mode = modeCombo->combo.getSelectedItemIndex();
+                const int mode =
+                    modeCombo->combo.getSelectedItemIndex();
                 const bool delay = isDelayMode (mode);
-                const bool synced = getBool ("delay_synced");
-                const int unit = getChoice ("space_delay_rateunit");
-                key += mode * 10 + (synced ? 2 : 0) + unit;
+                const bool synced =
+                    getBool ("delay_synced");
+                const int unit =
+                    getChoice ("space_delay_rateunit");
+                key += mode * 10
+                    + (synced ? 2 : 0)
+                    + unit;
 
-                if (! force && key == lastEffectContextKey)
+                if (! force
+                    && key == lastEffectContextKey)
+                {
                     return;
+                }
 
                 spaceDelaySync->setVisible (delay);
-                spaceDelayUnit->setVisible (delay && ! synced);
-                spaceDelayDivision->setVisible (delay && synced);
+                spaceDelayUnit->setVisible (
+                    delay && ! synced);
+                spaceDelayDivision->setVisible (
+                    delay && synced);
 
                 if (secondaryKnobs.size() >= 3)
                 {
-                    auto& timeOrSize = *secondaryKnobs[0];
-                    auto& feedbackOrDecay = *secondaryKnobs[1];
-                    auto& tone = *secondaryKnobs[2];
+                    auto& timeOrSize =
+                        *secondaryKnobs[0];
+                    auto& feedbackOrDecay =
+                        *secondaryKnobs[1];
+                    auto& tone =
+                        *secondaryKnobs[2];
 
                     if (delay)
                     {
                         timeOrSize.setVisible (! synced);
-                        feedbackOrDecay.setLabelText ("FEEDBACK");
-                        feedbackOrDecay.setTooltipText ("Delay feedback - higher values create more repeats");
+                        feedbackOrDecay.setLabelText (
+                            "FEEDBACK");
+                        feedbackOrDecay.setTooltipText (
+                            "Delay feedback - higher values create more repeats");
                         tone.setLabelText ("TONE");
-                        tone.setTooltipText ("Delay colour");
+                        tone.setTooltipText (
+                            "Delay colour");
 
                         if (unit == 0)
                         {
                             timeOrSize.setLabelText ("RATE");
-                            timeOrSize.setTooltipText ("Delay repetition rate in cycles per second");
-                            timeOrSize.setTextFunctions (
-                                [] (double percent) { return juce::String (delayRateHzFromPercent (percent), 2) + " Hz"; },
-                                [] (const juce::String& text) { return percentFromDelayRateHz (text.getDoubleValue()); });
+                            timeOrSize.setTooltipText (
+                                "Delay repetition rate");
+                            timeOrSize.setDisplayFunctions (
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        delayRateHzFromPercent (
+                                            percent),
+                                        false);
+                                },
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        delayRateHzFromPercent (
+                                            percent),
+                                        true);
+                                },
+                                [] (const juce::String& text)
+                                {
+                                    return percentFromDelayRateHz (
+                                        ValueFormatting::parseEngineeringValue (
+                                            text));
+                                });
                         }
                         else
                         {
                             timeOrSize.setLabelText ("TIME");
-                            timeOrSize.setTooltipText ("Time between delay repeats in seconds");
-                            timeOrSize.setTextFunctions (
-                                [] (double percent) { return juce::String (1.0 / delayRateHzFromPercent (percent), 2) + " s"; },
+                            timeOrSize.setTooltipText (
+                                "Time between delay repeats");
+                            timeOrSize.setDisplayFunctions (
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::seconds (
+                                        1.0
+                                        / delayRateHzFromPercent (
+                                            percent),
+                                        false);
+                                },
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::seconds (
+                                        1.0
+                                        / delayRateHzFromPercent (
+                                            percent),
+                                        true);
+                                },
                                 [] (const juce::String& text)
                                 {
-                                    const double seconds = juce::jmax (0.05, text.getDoubleValue());
-                                    return percentFromDelayRateHz (1.0 / seconds);
+                                    const double seconds =
+                                        juce::jmax (
+                                            0.05,
+                                            ValueFormatting::parseSeconds (
+                                                text));
+
+                                    return percentFromDelayRateHz (
+                                        1.0 / seconds);
                                 });
                         }
                     }
@@ -434,39 +670,211 @@ namespace mfx
                     {
                         timeOrSize.setVisible (true);
                         timeOrSize.setLabelText ("SIZE");
-                        timeOrSize.setTooltipText ("Reverb space size");
-                        timeOrSize.setFixedDecimals (2);
-                        feedbackOrDecay.setLabelText ("DECAY");
-                        feedbackOrDecay.setTooltipText ("Reverb tail length");
+                        timeOrSize.setTooltipText (
+                            "Reverb space size");
+                        timeOrSize.restoreDefaultFormatter();
+                        feedbackOrDecay.setLabelText (
+                            "DECAY");
+                        feedbackOrDecay.setTooltipText (
+                            "Reverb tail length");
                         tone.setLabelText ("TONE");
-                        tone.setTooltipText ("Reverb brightness");
+                        tone.setTooltipText (
+                            "Reverb brightness");
                     }
                 }
             }
             else if (id == EffectId::Filter)
             {
-                const int mode = modeCombo->combo.getSelectedItemIndex();
+                const int mode =
+                    modeCombo->combo.getSelectedItemIndex();
                 key += mode;
-                if (! force && key == lastEffectContextKey)
+
+                if (! force
+                    && key == lastEffectContextKey)
+                {
                     return;
+                }
 
                 const bool comb = mode == 5;
                 filterSlope->setVisible (! comb);
+
                 if (secondaryKnobs.size() >= 2)
                 {
-                    secondaryKnobs[0]->setLabelText (comb ? "FEEDBACK" : "RESONANCE");
-                    secondaryKnobs[0]->setTooltipText (comb ? "Comb-filter feedback"
-                                                           : "Filter resonance around the cutoff frequency");
-                    secondaryKnobs[1]->setLabelText ("MIX");
-                    secondaryKnobs[1]->setTooltipText ("Filtered signal amount");
+                    secondaryKnobs[0]->setLabelText (
+                        comb
+                            ? "FEEDBACK"
+                            : "RESONANCE");
+                    secondaryKnobs[0]->setTooltipText (
+                        comb
+                            ? "Comb-filter feedback"
+                            : "Filter resonance around the cutoff frequency");
+                    secondaryKnobs[1]->setLabelText (
+                        "MIX");
+                    secondaryKnobs[1]->setTooltipText (
+                        "Filtered signal amount");
                 }
             }
-            else if (! force && key == lastEffectContextKey)
+            else if (id == EffectId::Retro)
+            {
+                const int mode =
+                    modeCombo->combo.getSelectedItemIndex();
+                key += mode * 100000
+                    + (int) chain.retro.getSampleRate();
+
+                if (! force
+                    && key == lastEffectContextKey)
+                {
+                    return;
+                }
+
+                if (! secondaryKnobs.empty())
+                {
+                    auto& rate = *secondaryKnobs[0];
+
+                    switch (mode)
+                    {
+                        case 0:
+                            rate.setLabelText (
+                                "SAMPLE RATE");
+                            rate.setTooltipText (
+                                "Effective sample-and-hold rate used by Bitcrush");
+                            rate.setDisplayFunctions (
+                                [this] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        chain.retro.bitcrushSampleRateHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        false);
+                                },
+                                [this] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        chain.retro.bitcrushSampleRateHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        true);
+                                },
+                                [this] (const juce::String& text)
+                                {
+                                    return 100.0
+                                        * chain.retro
+                                            .bitcrushNormalisedFromSampleRateHz (
+                                                (float)
+                                                ValueFormatting::parseEngineeringValue (
+                                                    text));
+                                });
+                            break;
+
+                        case 1:
+                            rate.setLabelText (
+                                "BANDWIDTH");
+                            rate.setTooltipText (
+                                "Lossy-codec bandwidth");
+                            rate.setDisplayFunctions (
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::lossyBandwidthHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        false);
+                                },
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::lossyBandwidthHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        true);
+                                },
+                                [] (const juce::String& text)
+                                {
+                                    return 100.0
+                                        * RetroEffect
+                                            ::lossyNormalisedFromBandwidthHz (
+                                                (float)
+                                                ValueFormatting::parseEngineeringValue (
+                                                    text));
+                                });
+                            break;
+
+                        case 2:
+                            rate.setLabelText (
+                                "WOW RATE");
+                            rate.setTooltipText (
+                                "Wow and flutter movement rate");
+                            rate.setDisplayFunctions (
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::wearRateHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        false);
+                                },
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::wearRateHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        true);
+                                },
+                                [] (const juce::String& text)
+                                {
+                                    return 100.0
+                                        * RetroEffect
+                                            ::wearNormalisedFromRateHz (
+                                                (float)
+                                                ValueFormatting::parseEngineeringValue (
+                                                    text));
+                                });
+                            break;
+
+                        default:
+                            rate.setLabelText (
+                                "FILTER");
+                            rate.setTooltipText (
+                                "E-mu-style output filter cutoff");
+                            rate.setDisplayFunctions (
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::emuFilterHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        false);
+                                },
+                                [] (double percent)
+                                {
+                                    return ValueFormatting::frequencyHz (
+                                        RetroEffect::emuFilterHz (
+                                            (float) percent
+                                            / 100.0f),
+                                        true);
+                                },
+                                [] (const juce::String& text)
+                                {
+                                    return 100.0
+                                        * RetroEffect
+                                            ::emuNormalisedFromFilterHz (
+                                                (float)
+                                                ValueFormatting::parseEngineeringValue (
+                                                    text));
+                                });
+                            break;
+                    }
+                }
+            }
+            else if (! force
+                     && key == lastEffectContextKey)
             {
                 return;
             }
 
             lastEffectContextKey = key;
+            refreshModTargetText();
             resized();
             repaint();
         }
@@ -527,6 +935,7 @@ namespace mfx
 
         std::unique_ptr<LabeledCombo> modSourceCombo;
         std::unique_ptr<LabeledKnob> modDepthKnob;
+        juce::Label modTargetLabel;
 
         std::unique_ptr<LabeledCombo> lfoShape, lfoRateUnit, lfoDiv;
         std::unique_ptr<LabeledToggle> lfoSynced;

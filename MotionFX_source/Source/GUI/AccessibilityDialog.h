@@ -29,14 +29,14 @@ namespace mfx
                 enhancedControls,
                 enhancedControlsDescription,
                 "Enhanced controls",
-                "Uses thicker knob arcs, clearer pointers and stronger keyboard-focus rings.",
+                "Uses thicker knob arcs, clearer pointers, visible modulation ranges and stronger keyboard-focus rings.",
                 UiPreferences::instance().hasEnhancedControls());
 
             configureOption (
                 largerText,
                 largerTextDescription,
                 "Larger interface text",
-                "Increases interface text by approximately 12% while preserving the layout.",
+                "Increases interface text while keeping every control inside the current layout.",
                 UiPreferences::instance().hasLargerText());
 
             highContrast.onClick = [this]
@@ -67,7 +67,7 @@ namespace mfx
                 changed();
             };
 
-            setSize (520, 350);
+            setSize (600, 430);
         }
 
         void paint (juce::Graphics& graphics) override
@@ -75,44 +75,55 @@ namespace mfx
             graphics.fillAll (Palette::bg0);
 
             graphics.setColour (Palette::text);
-            graphics.setFont (FontBank::font (20.0f, true));
+            graphics.setFont (FontBank::font (24.0f, true));
             graphics.drawText (
                 "Accessibility",
-                18, 12, getWidth() - 36, 30,
+                20,
+                14,
+                getWidth() - 40,
+                34,
                 juce::Justification::centredLeft);
 
             graphics.setColour (Palette::textDim);
-            graphics.setFont (FontBank::font (11.5f));
-            graphics.drawText (
+            graphics.setFont (FontBank::font (13.5f));
+            graphics.drawFittedText (
                 "These preferences are global and are not stored inside presets.",
-                18, 42, getWidth() - 36, 24,
-                juce::Justification::centredLeft);
+                20,
+                50,
+                getWidth() - 40,
+                30,
+                juce::Justification::centredLeft,
+                2,
+                0.92f);
         }
 
         void resized() override
         {
-            auto bounds = getLocalBounds().reduced (18);
-            bounds.removeFromTop (58);
+            auto bounds = getLocalBounds().reduced (20);
+            bounds.removeFromTop (72);
 
             layoutOption (
                 highContrast,
                 highContrastDescription,
-                bounds.removeFromTop (66));
+                bounds.removeFromTop (76));
             bounds.removeFromTop (8);
+
             layoutOption (
                 reducedMotion,
                 reducedMotionDescription,
-                bounds.removeFromTop (66));
+                bounds.removeFromTop (76));
             bounds.removeFromTop (8);
+
             layoutOption (
                 enhancedControls,
                 enhancedControlsDescription,
-                bounds.removeFromTop (66));
+                bounds.removeFromTop (76));
             bounds.removeFromTop (8);
+
             layoutOption (
                 largerText,
                 largerTextDescription,
-                bounds.removeFromTop (66));
+                bounds.removeFromTop (76));
         }
 
     private:
@@ -135,10 +146,11 @@ namespace mfx
             description.setColour (
                 juce::Label::textColourId,
                 Palette::textDim);
-            description.setFont (FontBank::font (11.0f));
+            description.setFont (
+                FontBank::font (13.0f));
             description.setJustificationType (
                 juce::Justification::topLeft);
-            description.setMinimumHorizontalScale (0.82f);
+            description.setMinimumHorizontalScale (0.90f);
             addAndMakeVisible (description);
         }
 
@@ -148,9 +160,9 @@ namespace mfx
             juce::Rectangle<int> area)
         {
             toggle.setBounds (
-                area.removeFromTop (30));
+                area.removeFromTop (34));
             description.setBounds (
-                area.reduced (8, 0));
+                area.reduced (10, 0));
         }
 
         void changed()

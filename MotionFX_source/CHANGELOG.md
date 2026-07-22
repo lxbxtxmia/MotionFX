@@ -1,5 +1,16 @@
 # MotionFX changelog
 
+## 0.8.1 - UI refinement
+
+- Corrected Undo and Redo vector icons so the curve no longer crosses the arrow head.
+- Restored the MotionFX wordmark hierarchy and increased interface text readability.
+- Added compact engineering notation such as 20.0 kHz while preserving precise manual entry.
+- Added contextual Pan, Filter, Width, Delay and Retro values.
+- Expanded Width to 0-200%, with 0% mono and 100% unchanged stereo.
+- Added live modulation-range arcs and a target/range readout on primary effect knobs.
+- Simplified the stereo output meter into two gradient bars.
+- Applied adaptive corner radii for square and rectangular controls.
+
 ## 0.8.0 - Block 8
 
 - Rebuilt the main header with balanced spacing and vector icon buttons.

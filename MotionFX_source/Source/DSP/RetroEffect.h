@@ -11,146 +11,362 @@ namespace mfx
     public:
         void prepare (double sr) noexcept
         {
-            sampleRate = sr;
+            sampleRate = juce::jmax (1.0, sr);
             wowLfoPhase = 0.0f;
-            for (auto& s : holdSamp) s = 0.0f;
-            for (auto& c : holdCounter) c = 0;
-            for (auto& d : wowDelay) { d.assign (2048, 0.0f); }
+            for (auto& sample : holdSamp)
+                sample = 0.0f;
+            for (auto& counter : holdCounter)
+                counter = 0;
+            for (auto& delay : wowDelay)
+                delay.assign (2048, 0.0f);
             wowWritePos = 0;
             rng.seed (2024u);
         }
+
         void reset() noexcept
         {
-            for (auto& s : holdSamp) s = 0.0f;
-            for (auto& c : holdCounter) c = 0;
+            for (auto& sample : holdSamp)
+                sample = 0.0f;
+            for (auto& counter : holdCounter)
+                counter = 0;
             lpStateL = lpStateR = 0.0f;
         }
 
-        void setMode (RetroMode m) noexcept { mode = m; }
-        void setParams (float rateN, float toneN, float mixN) noexcept
+        void setMode (RetroMode newMode) noexcept { mode = newMode; }
+
+        void setParams (float rateNormalised,
+                        float toneNormalised,
+                        float mixNormalised) noexcept
         {
-            rateParam = juce::jlimit (0.0f, 1.0f, rateN);
-            toneParam = juce::jlimit (-1.0f, 1.0f, toneN);
-            mix = juce::jlimit (0.0f, 1.0f, mixN);
+            rateParam = juce::jlimit (
+                0.0f, 1.0f, rateNormalised);
+            toneParam = juce::jlimit (
+                -1.0f, 1.0f, toneNormalised);
+            mix = juce::jlimit (
+                0.0f, 1.0f, mixNormalised);
         }
 
-        // amount: 0..1, already modulated by caller -- overall crush intensity
-        void processBlock (juce::AudioBuffer<float>& buf, float amount) noexcept
+        double getSampleRate() const noexcept
+        {
+            return sampleRate;
+        }
+
+        float bitcrushSampleRateHz (
+            float rateNormalised) const noexcept
+        {
+            const int factor = bitcrushFactor (rateNormalised);
+            return (float) sampleRate / (float) factor;
+        }
+
+        float bitcrushNormalisedFromSampleRateHz (
+            float hz) const noexcept
+        {
+            const int factor = juce::jlimit (
+                1,
+                8,
+                (int) std::lround (
+                    sampleRate / juce::jmax (1.0f, hz)));
+
+            return (float) (factor - 1) / 7.0f;
+        }
+
+        static float lossyBandwidthHz (
+            float rateNormalised) noexcept
+        {
+            return juce::jmap (
+                juce::jlimit (0.0f, 1.0f, rateNormalised),
+                0.0f,
+                1.0f,
+                1200.0f,
+                18000.0f);
+        }
+
+        static float lossyNormalisedFromBandwidthHz (
+            float hz) noexcept
+        {
+            return juce::jmap (
+                juce::jlimit (1200.0f, 18000.0f, hz),
+                1200.0f,
+                18000.0f,
+                0.0f,
+                1.0f);
+        }
+
+        static float wearRateHz (
+            float rateNormalised) noexcept
+        {
+            return 0.6f
+                + juce::jlimit (
+                    0.0f, 1.0f, rateNormalised)
+                  * 4.0f;
+        }
+
+        static float wearNormalisedFromRateHz (
+            float hz) noexcept
+        {
+            return juce::jlimit (
+                0.0f,
+                1.0f,
+                (hz - 0.6f) / 4.0f);
+        }
+
+        static float emuFilterHz (
+            float rateNormalised) noexcept
+        {
+            return juce::jmap (
+                juce::jlimit (0.0f, 1.0f, rateNormalised),
+                0.0f,
+                1.0f,
+                3000.0f,
+                12000.0f);
+        }
+
+        static float emuNormalisedFromFilterHz (
+            float hz) noexcept
+        {
+            return juce::jmap (
+                juce::jlimit (3000.0f, 12000.0f, hz),
+                3000.0f,
+                12000.0f,
+                0.0f,
+                1.0f);
+        }
+
+        // amount: 0..1, already modulated by caller.
+        void processBlock (juce::AudioBuffer<float>& buffer,
+                           float amount) noexcept
         {
             amount = juce::jlimit (0.0f, 1.0f, amount);
-            for (int ch = 0; ch < buf.getNumChannels() && ch < 2; ++ch)
+
+            for (int channel = 0;
+                 channel < buffer.getNumChannels() && channel < 2;
+                 ++channel)
             {
-                auto* d = buf.getWritePointer (ch);
-                for (int i = 0; i < buf.getNumSamples(); ++i)
+                auto* data = buffer.getWritePointer (channel);
+
+                for (int sample = 0;
+                     sample < buffer.getNumSamples();
+                     ++sample)
                 {
-                    float x = d[i];
+                    const float input = data[sample];
                     float wet = 0.0f;
+
                     switch (mode)
                     {
-                        case RetroMode::Bitcrush:    wet = bitcrush (x, ch, amount); break;
-                        case RetroMode::Lossy:       wet = lossy (x, ch, amount); break;
-                        case RetroMode::WearAndTear: wet = wearAndTear (x, ch, amount); break;
-                        case RetroMode::Emu12Bit:    wet = emu12 (x, ch, amount); break;
+                        case RetroMode::Bitcrush:
+                            wet = bitcrush (
+                                input, channel, amount);
+                            break;
+                        case RetroMode::Lossy:
+                            wet = lossy (
+                                input, channel, amount);
+                            break;
+                        case RetroMode::WearAndTear:
+                            wet = wearAndTear (
+                                input, channel, amount);
+                            break;
+                        case RetroMode::Emu12Bit:
+                            wet = emu12 (
+                                input, channel, amount);
+                            break;
                     }
-                    d[i] = flushDenorm (x * (1.0f - mix) + wet * mix);
+
+                    data[sample] = flushDenorm (
+                        input * (1.0f - mix)
+                        + wet * mix);
                 }
             }
         }
 
     private:
-        float bitcrush (float x, int ch, float amount) noexcept
+        static int bitcrushFactor (
+            float rateNormalised) noexcept
         {
-            float bits = juce::jmap (amount, 0.0f, 1.0f, 16.0f, 2.0f);
-            float levels = std::pow (2.0f, bits);
-            float q = std::round (x * levels) / levels;
+            return 1
+                + (int) (
+                    juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        rateNormalised)
+                    * 7.0f);
+        }
 
-            int factor = 1 + (int) (rateParam * 7.0f);
-            if (holdCounter[(size_t) ch] <= 0)
+        float bitcrush (float input,
+                        int channel,
+                        float amount) noexcept
+        {
+            const float bits = juce::jmap (
+                amount,
+                0.0f,
+                1.0f,
+                16.0f,
+                2.0f);
+            const float levels = std::pow (2.0f, bits);
+            const float quantised =
+                std::round (input * levels) / levels;
+
+            const int factor =
+                bitcrushFactor (rateParam);
+
+            if (holdCounter[(size_t) channel] <= 0)
             {
-                holdSamp[(size_t) ch] = q;
-                holdCounter[(size_t) ch] = factor;
+                holdSamp[(size_t) channel] = quantised;
+                holdCounter[(size_t) channel] = factor;
             }
-            --holdCounter[(size_t) ch];
-            return holdSamp[(size_t) ch];
+
+            --holdCounter[(size_t) channel];
+            return holdSamp[(size_t) channel];
         }
 
-        float lossy (float x, int ch, float amount) noexcept
+        float lossy (float input,
+                     int channel,
+                     float amount) noexcept
         {
-            float cutoffHz = juce::jmap (amount, 0.0f, 1.0f, 18000.0f, 1200.0f);
-            float coeff = std::exp (-2.0f * juce::MathConstants<float>::pi * cutoffHz / (float) sampleRate);
-            float& lp = (ch == 0) ? lpStateL : lpStateR;
-            lp = coeff * lp + (1.0f - coeff) * x;
+            const float selectedBandwidth =
+                lossyBandwidthHz (rateParam);
+            const float cutoffHz = juce::jmap (
+                amount,
+                0.0f,
+                1.0f,
+                selectedBandwidth,
+                juce::jmax (
+                    700.0f,
+                    selectedBandwidth * 0.35f));
 
-            float noise = (dist (rng)) * amount * 0.015f;
-            return lp + noise;
+            const float coefficient = std::exp (
+                -2.0f
+                * juce::MathConstants<float>::pi
+                * cutoffHz
+                / (float) sampleRate);
+
+            float& lowPassState =
+                channel == 0 ? lpStateL : lpStateR;
+
+            lowPassState = coefficient * lowPassState
+                         + (1.0f - coefficient) * input;
+
+            const float noise =
+                dist (rng) * amount * 0.015f;
+            return lowPassState + noise;
         }
 
-        float wearAndTear (float x, int ch, float amount) noexcept
+        float wearAndTear (float input,
+                           int channel,
+                           float amount) noexcept
         {
-            // wow/flutter via a modulated short delay
-            auto& buf = wowDelay[(size_t) ch];
-            int size = (int) buf.size();
-            buf[(size_t) wowWritePos] = x;
+            auto& delay = wowDelay[(size_t) channel];
+            const int size = (int) delay.size();
+            delay[(size_t) wowWritePos] = input;
 
-            float lfo = std::sin (wowLfoPhase);
-            float depthSamples = amount * 12.0f;
-            float readPos = (float) wowWritePos - 20.0f - lfo * depthSamples;
-            while (readPos < 0.0f) readPos += (float) size;
-            int i0 = (int) readPos % size;
-            int i1 = (i0 + 1) % size;
-            float frac = readPos - std::floor (readPos);
-            float wowed = buf[(size_t) i0] + frac * (buf[(size_t) i1] - buf[(size_t) i0]);
+            const float lfo = std::sin (wowLfoPhase);
+            const float depthSamples = amount * 12.0f;
+            float readPosition =
+                (float) wowWritePos
+                - 20.0f
+                - lfo * depthSamples;
 
-            if (ch == 0)
+            while (readPosition < 0.0f)
+                readPosition += (float) size;
+
+            const int first = (int) readPosition % size;
+            const int second = (first + 1) % size;
+            const float fraction =
+                readPosition - std::floor (readPosition);
+            const float wowed =
+                delay[(size_t) first]
+                + fraction
+                    * (delay[(size_t) second]
+                       - delay[(size_t) first]);
+
+            if (channel == 0)
             {
-                wowLfoPhase += juce::MathConstants<float>::twoPi * (0.6f + rateParam * 4.0f) / (float) sampleRate;
-                if (wowLfoPhase > juce::MathConstants<float>::twoPi) wowLfoPhase -= juce::MathConstants<float>::twoPi;
+                wowLfoPhase +=
+                    juce::MathConstants<float>::twoPi
+                    * wearRateHz (rateParam)
+                    / (float) sampleRate;
+
+                if (wowLfoPhase
+                    > juce::MathConstants<float>::twoPi)
+                {
+                    wowLfoPhase -=
+                        juce::MathConstants<float>::twoPi;
+                }
+
                 wowWritePos = (wowWritePos + 1) % size;
             }
 
             float crackle = 0.0f;
-            if (uniform01 (rng) < (0.0006f * amount))
-                crackle = (dist (rng)) * 0.7f;
+            if (uniform01 (rng) < 0.0006f * amount)
+                crackle = dist (rng) * 0.7f;
 
-            float hiss = dist (rng) * amount * 0.02f;
-            return wowed * (1.0f - amount * 0.15f) + hiss + crackle;
+            const float hiss =
+                dist (rng) * amount * 0.02f;
+
+            return wowed
+                     * (1.0f - amount * 0.15f)
+                 + hiss
+                 + crackle;
         }
 
-        float emu12 (float x, int ch, float amount) noexcept
+        float emu12 (float input,
+                     int channel,
+                     float amount) noexcept
         {
-            const float bits = 12.0f;
-            float levels = std::pow (2.0f, bits);
-            float q = std::round (x * levels) / levels;
+            constexpr float bits = 12.0f;
+            const float levels = std::pow (2.0f, bits);
+            const float quantised =
+                std::round (input * levels) / levels;
 
-            int factor = 1 + (int) (amount * 5.0f);
-            if (holdCounter[(size_t) ch] <= 0)
+            const int factor =
+                1 + (int) (amount * 5.0f);
+
+            if (holdCounter[(size_t) channel] <= 0)
             {
-                holdSamp[(size_t) ch] = q;
-                holdCounter[(size_t) ch] = factor;
+                holdSamp[(size_t) channel] = quantised;
+                holdCounter[(size_t) channel] = factor;
             }
-            --holdCounter[(size_t) ch];
 
-            float cutoffHz = juce::jmap (rateParam, 0.0f, 1.0f, 3000.0f, 12000.0f);
-            float coeff = std::exp (-2.0f * juce::MathConstants<float>::pi * cutoffHz / (float) sampleRate);
-            float& lp = (ch == 0) ? lpStateL : lpStateR;
-            lp = coeff * lp + (1.0f - coeff) * holdSamp[(size_t) ch];
-            return lp;
+            --holdCounter[(size_t) channel];
+
+            const float cutoffHz =
+                emuFilterHz (rateParam);
+            const float coefficient = std::exp (
+                -2.0f
+                * juce::MathConstants<float>::pi
+                * cutoffHz
+                / (float) sampleRate);
+
+            float& lowPassState =
+                channel == 0 ? lpStateL : lpStateR;
+
+            lowPassState = coefficient * lowPassState
+                         + (1.0f - coefficient)
+                             * holdSamp[(size_t) channel];
+
+            return lowPassState;
         }
 
         double sampleRate = 44100.0;
         RetroMode mode = RetroMode::Bitcrush;
-        float rateParam = 0.3f, toneParam = 0.0f, mix = 1.0f;
+        float rateParam = 0.3f;
+        float toneParam = 0.0f;
+        float mix = 1.0f;
 
         std::array<float, 2> holdSamp {};
         std::array<int, 2> holdCounter {};
-        float lpStateL = 0.0f, lpStateR = 0.0f;
+        float lpStateL = 0.0f;
+        float lpStateR = 0.0f;
 
         std::array<std::vector<float>, 2> wowDelay;
         int wowWritePos = 0;
         float wowLfoPhase = 0.0f;
 
         std::mt19937 rng;
-        std::uniform_real_distribution<float> dist { -1.0f, 1.0f };
-        std::uniform_real_distribution<float> uniform01 { 0.0f, 1.0f };
+        std::uniform_real_distribution<float> dist {
+            -1.0f, 1.0f
+        };
+        std::uniform_real_distribution<float> uniform01 {
+            0.0f, 1.0f
+        };
     };
 }

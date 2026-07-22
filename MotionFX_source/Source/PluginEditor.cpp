@@ -116,7 +116,7 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     addAndMakeVisible (content);
 
     titleLabel.setText ("MOTIONFX", juce::dontSendNotification);
-    titleLabel.setFont (FontBank::font (22.0f, true));
+    titleLabel.setFont (FontBank::font (26.0f, true));
     titleLabel.setColour (juce::Label::textColourId, Palette::teal);
     titleLabel.setTooltip ("About MotionFX");
     titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -315,7 +315,7 @@ void MotionFXAudioProcessorEditor::rebuildThemedControls()
 
     stutterPanel.reset();
 
-    titleLabel.setFont (FontBank::font (22.0f, true));
+    titleLabel.setFont (FontBank::font (26.0f, true));
     titleLabel.setColour (
         juce::Label::textColourId,
         Palette::teal);
@@ -385,67 +385,101 @@ void MotionFXAudioProcessorEditor::applyUiPreferences()
 
 void MotionFXAudioProcessorEditor::resized()
 {
-    const float scale = getWidth() / (float) baseW;
-    scalePercent = juce::roundToInt (scale * 100.0f);
-    content.setTransform (juce::AffineTransform::scale (scale));
+    const float scale =
+        getWidth() / (float) baseW;
+    scalePercent = juce::roundToInt (
+        scale * 100.0f);
+
+    content.setTransform (
+        juce::AffineTransform::scale (scale));
     content.setBounds (0, 0, baseW, baseH);
 
-    auto bounds = content.getLocalBounds().reduced (14);
-    auto header = bounds.removeFromTop (88);
+    auto bounds =
+        content.getLocalBounds().reduced (14);
+    auto header = bounds.removeFromTop (90);
 
+    auto titleArea =
+        header.removeFromLeft (142);
     titleLabel.setBounds (
-        header.removeFromLeft (142).reduced (0, 17));
+        titleArea.reduced (0, 14));
 
-    auto masterArea = header.removeFromRight (398);
+    // Keep the same visual margin on both sides of the MotionFX wordmark.
+    header.removeFromLeft (14);
+
+    auto masterArea =
+        header.removeFromRight (390);
 
     matchGainToggle->setBounds (
-        masterArea.removeFromRight (104).reduced (1, 20));
-    masterArea.removeFromRight (7);
+        masterArea.removeFromRight (104)
+                  .reduced (1, 21));
+    masterArea.removeFromRight (8);
 
     outputMeter->setBounds (
-        masterArea.removeFromRight (42).reduced (0, 8));
-    masterArea.removeFromRight (7);
+        masterArea.removeFromRight (30)
+                  .reduced (0, 8));
+    masterArea.removeFromRight (9);
 
     dryWetKnob->setBounds (
-        masterArea.removeFromRight (72).translated (0, 3));
+        masterArea.removeFromRight (72)
+                  .translated (0, 3));
     masterArea.removeFromRight (5);
+
     outputKnob->setBounds (
-        masterArea.removeFromRight (72).translated (0, 3));
+        masterArea.removeFromRight (72)
+                  .translated (0, 3));
     masterArea.removeFromRight (5);
+
     inputKnob->setBounds (
-        masterArea.removeFromRight (72).translated (0, 3));
+        masterArea.removeFromRight (72)
+                  .translated (0, 3));
 
     auto presetBar = header;
-    optionsBtn.setBounds (
-        presetBar.removeFromRight (36).reduced (1, 25));
-    presetBar.removeFromRight (5);
-    savePresetBtn.setBounds (
-        presetBar.removeFromRight (36).reduced (1, 25));
-    presetBar.removeFromRight (6);
-    redoBtn.setBounds (
-        presetBar.removeFromRight (36).reduced (1, 25));
-    presetBar.removeFromRight (5);
-    undoBtn.setBounds (
-        presetBar.removeFromRight (36).reduced (1, 25));
-    presetBar.removeFromRight (7);
+
+    const auto placeSquareRight =
+        [&presetBar] (juce::Component& component,
+                      int gapAfter)
+        {
+            auto cell =
+                presetBar.removeFromRight (38);
+            component.setBounds (
+                cell.withSizeKeepingCentre (36, 36));
+            presetBar.removeFromRight (gapAfter);
+        };
+
+    placeSquareRight (optionsBtn, 5);
+    placeSquareRight (savePresetBtn, 6);
+    placeSquareRight (redoBtn, 5);
+    placeSquareRight (undoBtn, 8);
+
+    auto nextCell =
+        presetBar.removeFromRight (38);
     nextPresetBtn.setBounds (
-        presetBar.removeFromRight (32).reduced (0, 25));
+        nextCell.withSizeKeepingCentre (36, 36));
     presetBar.removeFromRight (5);
+
+    auto previousCell =
+        presetBar.removeFromLeft (38);
     prevPresetBtn.setBounds (
-        presetBar.removeFromLeft (32).reduced (0, 25));
+        previousCell.withSizeKeepingCentre (36, 36));
     presetBar.removeFromLeft (5);
+
     presetNameButton.setBounds (
-        presetBar.reduced (0, 25));
+        presetBar.reduced (0, 27));
 
     bounds.removeFromTop (6);
-    tabStrip.setBounds (bounds.removeFromTop (42));
+    tabStrip.setBounds (
+        bounds.removeFromTop (44));
     bounds.removeFromTop (9);
 
     const auto order = processor.getOrder();
 
-    for (int slot = 0; slot < numEffects; ++slot)
+    for (int slot = 0;
+         slot < numEffects;
+         ++slot)
     {
-        const bool visible = slot == selectedSlot;
+        const bool visible =
+            slot == selectedSlot;
+
         auto* panel = effectPanels[
             (size_t) order[(size_t) slot]].get();
 
@@ -458,11 +492,13 @@ void MotionFXAudioProcessorEditor::resized()
             panel->setBounds (bounds);
     }
 
-    const bool stutterVisible = selectedSlot == numEffects;
+    const bool stutterVisible =
+        selectedSlot == numEffects;
 
     if (stutterPanel != nullptr)
     {
-        stutterPanel->setVisible (stutterVisible);
+        stutterPanel->setVisible (
+            stutterVisible);
 
         if (stutterVisible)
             stutterPanel->setBounds (bounds);
@@ -517,7 +553,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.8.0 - Build 8
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.8.1 - Build 8.1
 
 Multi-effect modulation VST3.
 
@@ -537,7 +573,12 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.8.0 - Build 8
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.8.1 - Build 8.1
+- Refined vector arrows, typography, engineering units and adaptive control geometry.
+- Added 0-200% Width and live modulation-range displays.
+- Simplified the stereo output meter.
+
+0.8.0 - Build 8
 - Rebuilt the header with vector icon controls and compact master knobs.
 - Added a post-effect stereo peak meter with green, yellow and red dBFS zones.
 - Embedded Atkinson Hyperlegible Next Regular and Bold.

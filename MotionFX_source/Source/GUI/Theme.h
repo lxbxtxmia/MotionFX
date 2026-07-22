@@ -141,7 +141,7 @@ namespace mfx
 
         float getTextScale() const noexcept
         {
-            return largerText ? 1.12f : 1.0f;
+            return largerText ? 1.24f : 1.10f;
         }
 
         void setThemeId (juce::String newThemeId)

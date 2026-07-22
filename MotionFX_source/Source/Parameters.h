@@ -52,7 +52,9 @@ namespace mfx
     using APF = juce::AudioProcessorValueTreeState;
     using Layout = std::vector<std::unique_ptr<juce::RangedAudioParameter>>;
 
-    inline void addModBlock (Layout& parameters, const juce::String& prefix, int versionHint)
+    inline void addModBlock (Layout& parameters, const juce::String& prefix, int versionHint,
+                             float baseMaximum = 100.0f,
+                             float baseDefault = 50.0f)
     {
         juce::ignoreUnused (versionHint);
 
@@ -60,7 +62,7 @@ namespace mfx
             juce::ParameterID (pidFor (prefix, "enabled"), 1), prefix + " Enabled", false));
         parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID (pidFor (prefix, "base"), 1), prefix + " Amount",
-            juce::NormalisableRange<float> (0.0f, 100.0f), 50.0f));
+            juce::NormalisableRange<float> (0.0f, baseMaximum), baseDefault));
         parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID (pidFor (prefix, "modsource"), 1), prefix + " Mod Source", modSourceChoices(), 0));
         parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -144,7 +146,9 @@ namespace mfx
         for (int effect = 0; effect < numEffects; ++effect)
         {
             const juce::String prefix = effectPrefixes[effect];
-            addModBlock (parameters, prefix, 1);
+            addModBlock (parameters, prefix, 1,
+                         prefix == "width" ? 200.0f : 100.0f,
+                         prefix == "width" ? 100.0f : 50.0f);
 
             if (prefix == "drive")
             {
