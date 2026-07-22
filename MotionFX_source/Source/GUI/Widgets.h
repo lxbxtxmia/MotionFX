@@ -447,7 +447,8 @@ namespace mfx
 
     //==============================================================================
     // Left-click/drag paints an action; right-click/drag erases it.
-    class StepLaneGrid : public juce::Component
+    class StepLaneGrid : public juce::Component,
+                         public juce::SettableTooltipClient
     {
     public:
         StepLaneGrid (juce::AudioProcessorValueTreeState& state,
@@ -560,7 +561,8 @@ namespace mfx
     };
 
     //==============================================================================
-    class PitchStepGrid : public juce::Component
+    class PitchStepGrid : public juce::Component,
+                          public juce::SettableTooltipClient
     {
     public:
         PitchStepGrid (juce::AudioProcessorValueTreeState& state,
