@@ -323,7 +323,9 @@ int main()
 
             if (maximumError > 1.0e-5f)
             {
-                std::cout << "  [FAIL] Retro mode is not transparent at zero amount"
+                std::cout << "  [FAIL] Retro mode "
+                          << (int) mode
+                          << " is not transparent at zero amount"
                           << std::endl;
                 ++failures;
             }

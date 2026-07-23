@@ -651,7 +651,23 @@ namespace mfx
                 auto& state = bitState[(size_t) channel];
                 for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
                 {
-                    float input = data[sample];
+                    const float dry = data[sample];
+
+                    // Amount zero must be exactly transparent, regardless of
+                    // anti-aliasing or the selected hold/interpolation mode.
+                    // Keep the state-aliasing or the selected hold/inter primed with the current signal so that
+                    // re-enabling Bitcrush does not replay a stale sample.
+                    if (amount <= 1.0e-6f)
+                    {
+                        state.phase = 1.0;
+                        state.previous = dry;
+                        state.held = dry;
+                        state.smooth = dry;
+                        data[sample] = dry;
+                        continue;
+                    }
+
+                    float input = dry;
                     if (bitAntiAlias)
                         input = bitAntiAliasLowpass[(size_t) channel].process (input, antiAliasCoefficient);
 
