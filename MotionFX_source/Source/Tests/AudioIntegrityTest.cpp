@@ -198,11 +198,18 @@ int main()
     }
 
     const auto nearlyEqual = [] (double a, double b) { return std::abs (a - b) < 1.0e-6; };
+    const auto divisions = mfx::syncDivChoices();
     if (! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_4D), 1.5)
         || ! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_4T), 2.0 / 3.0)
-        || ! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_16D), 0.375))
+        || ! nearlyEqual (mfx::syncDivToBeats (mfx::SyncDiv::d1_16D), 0.375)
+        || divisions[12] != "1/16"
+        || divisions[13] != "1/16T"
+        || divisions[14] != "1/16D"
+        || mfx::syncDivGroupSize (mfx::SyncDiv::d1_16) != 4
+        || mfx::syncDivGroupSize (mfx::SyncDiv::d1_16T) != 3
+        || mfx::syncDivGroupSize (mfx::SyncDiv::d1_16D) != 2)
     {
-        std::cout << "  [FAIL] dotted/triplet sync conversion mismatch" << std::endl;
+        std::cout << "  [FAIL] sync ordering, conversion or Stutter grouping mismatch" << std::endl;
         ++failures;
     }
 
@@ -596,6 +603,153 @@ int main()
         {
             std::cout
                 << "  [FAIL] Groove Phase stereo Pinch produced no stereo phase difference"
+                << std::endl;
+            ++failures;
+        }
+    }
+
+    // 0.9.1 Drive transfer-function and Groove Phase reference checks.
+    {
+        // Post Soft must be transparent below its knee; Hard must remain a
+        // mathematically strict +/-1 clamp rather than sounding softer.
+        const auto renderConstant = [] (int postMode, float inputValue)
+        {
+            mfx::DriveEffect drive;
+            drive.prepare (48000.0, 128);
+            drive.setMode (mfx::DriveMode::SoftClip);
+            drive.setParams (0.0f, 1.0f, 0.0f, 0.0f, 0, postMode);
+
+            juce::AudioBuffer<float> buffer (2, 128);
+            buffer.clear();
+            for (int channel = 0; channel < 2; ++channel)
+                for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                    buffer.setSample (channel, sample, inputValue);
+
+            drive.processBlock (buffer, 0.0f);
+            return buffer.getSample (0, 127);
+        };
+
+        const float softHalf = renderConstant (1, 0.5f);
+        const float hardHalf = renderConstant (2, 0.5f);
+        const float softHot = renderConstant (1, 1.4f);
+        const float hardHot = renderConstant (2, 1.4f);
+
+        if (std::abs (softHalf - 0.5f) > 0.01f
+            || std::abs (hardHalf - 0.5f) > 0.01f
+            || std::abs (softHot) >= 1.0f
+            || std::abs (hardHot - 1.0f) > 0.01f)
+        {
+            std::cout
+                << "  [FAIL] Soft/Hard post-clipping transfer functions are incorrect"
+                << std::endl;
+            ++failures;
+        }
+
+        // Every Drive algorithm must be transparent at zero Drive when the
+        // post stage is disabled.
+        for (int mode = 0; mode < 8; ++mode)
+        {
+            mfx::DriveEffect drive;
+            drive.prepare (48000.0, 256);
+            drive.setMode ((mfx::DriveMode) mode);
+            drive.setParams (0.35f, 1.0f, 0.0f, 0.4f, 0, 0);
+            drive.setGroovePhaseParams (
+                true, 12.0f, 1700.0f, 0.47f,
+                true, 12.0f, 707.0f, 3.0f,
+                0, true);
+
+            juce::AudioBuffer<float> buffer (2, 256);
+            juce::AudioBuffer<float> reference (2, 256);
+            for (int sample = 0; sample < 256; ++sample)
+            {
+                const float value = 0.35f * std::sin (
+                    juce::MathConstants<float>::twoPi
+                    * 997.0f * (float) sample / 48000.0f);
+                buffer.setSample (0, sample, value);
+                buffer.setSample (1, sample, value * 0.73f);
+                reference.setSample (0, sample, value);
+                reference.setSample (1, sample, value * 0.73f);
+            }
+
+            drive.processBlock (buffer, 0.0f);
+            float maximumDifference = 0.0f;
+            for (int channel = 0; channel < 2; ++channel)
+                for (int sample = 0; sample < 256; ++sample)
+                    maximumDifference = juce::jmax (
+                        maximumDifference,
+                        std::abs (buffer.getSample (channel, sample)
+                                  - reference.getSample (channel, sample)));
+
+            if (maximumDifference > 0.002f)
+            {
+                std::cout
+                    << "  [FAIL] Drive mode " << mode
+                    << " is not transparent at zero Drive"
+                    << std::endl;
+                ++failures;
+            }
+        }
+
+        // The supplied reference IR shows a left-only source becoming
+        // approximately L=x+|x| and R=-|x| for Pinch=0.50, Soft/Stereo.
+        // This verifies the characteristic cross-channel DC component while
+        // keeping the generated offset bounded.
+        mfx::DriveEffect groove;
+        groove.prepare (44100.0, 512);
+        groove.setMode (mfx::DriveMode::GroovePhase);
+        groove.setParams (0.0f, 1.0f, 0.0f, 0.0f, 0, 0);
+        groove.setGroovePhaseParams (
+            false, 0.0f, 1700.0f, 0.47f,
+            true, 12.0f, 707.0f, 3.0f,
+            0, true);
+
+        juce::AudioBuffer<float> referenceBuffer (2, 512);
+        double phase = 0.0;
+        double meanLeft = 0.0;
+        double meanRight = 0.0;
+        float peakLeft = 0.0f;
+        float peakRight = 0.0f;
+
+        for (int block = 0; block < 24; ++block)
+        {
+            for (int sample = 0; sample < 512; ++sample)
+            {
+                const float source = 0.10f * (float) std::sin (phase);
+                phase += juce::MathConstants<double>::twoPi * 1000.0 / 44100.0;
+                if (phase > juce::MathConstants<double>::twoPi)
+                    phase -= juce::MathConstants<double>::twoPi;
+                referenceBuffer.setSample (0, sample, source);
+                referenceBuffer.setSample (1, sample, 0.0f);
+            }
+
+            groove.processBlock (referenceBuffer, 1.0f);
+
+            if (block == 23)
+            {
+                for (int sample = 0; sample < 512; ++sample)
+                {
+                    const float left = referenceBuffer.getSample (0, sample);
+                    const float right = referenceBuffer.getSample (1, sample);
+                    meanLeft += left;
+                    meanRight += right;
+                    peakLeft = juce::jmax (peakLeft, std::abs (left));
+                    peakRight = juce::jmax (peakRight, std::abs (right));
+                }
+            }
+        }
+
+        meanLeft /= 512.0;
+        meanRight /= 512.0;
+
+        if (meanLeft < 0.035
+            || meanRight > -0.035
+            || peakLeft < 0.14f
+            || peakRight < 0.055f
+            || peakLeft > 0.34f
+            || peakRight > 0.24f)
+        {
+            std::cout
+                << "  [FAIL] Groove Phase does not reproduce the bounded stereo Pinch/DC behaviour"
                 << std::endl;
             ++failures;
         }

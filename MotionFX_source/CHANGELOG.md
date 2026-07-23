@@ -1,5 +1,23 @@
 # MotionFX changelog
 
+## 0.9.1 - Build 9.1: Groove Phase reference pass
+
+- Analysed the supplied Ableton Vinyl Distortion and MotionFX IR sweeps at matching settings.
+- Reworked Groove Phase Pinch as a coupled stereo geometric component with bounded, intentional DC punch.
+- Matched the reference behaviour more closely: a left-only source produces a positive Pinch component on the left and its opposite polarity on the right in Stereo mode.
+- Added a frequency-coloured Pinch response and retained independent Tracing Model band shaping.
+- Added editable Gain, Frequency and Bandwidth fields below both X-Y graphs.
+- Added a live logarithmic output spectrum behind the Groove Phase response curves.
+- Corrected Soft post clipping to remain transparent below its knee; Hard remains a strict clamp.
+- Added zero-Drive transparency, clipping-transfer and Groove Phase reference tests.
+- Unified labels, numeric values and units on the embedded Atkinson Hyperlegible Next typeface.
+- Applied the active MotionFX theme and embedded font to About/Changelog, Accessibility, preset-save, folder-creation and preset-error dialogs.
+- Fixed invisible About/Changelog text and mismatched scrollbars in the Light theme.
+- Kept MotionFX branding and Gain Match at fixed readable sizes under Larger Interface Text.
+- Double-clicking knobs now restores each APVTS parameter's declared default.
+- Reordered sync divisions as straight, triplet and dotted groups and added 4/3/2-step separators in Stutter.
+- Redrew Undo/Redo vector arrows with non-overlapping heads and shafts.
+
 ## 0.9.0 - Build 9: Drive Lab
 
 - Rebuilt the Drive engine with eight distinct distortion algorithms.

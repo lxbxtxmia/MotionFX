@@ -5,16 +5,83 @@ using namespace mfx;
 
 namespace
 {
+    MotionFXLookAndFeel& dialogLookAndFeel()
+    {
+        static MotionFXLookAndFeel lookAndFeel;
+        lookAndFeel.refreshColours();
+        return lookAndFeel;
+    }
+
+    void configureThemedTextEditor (
+        juce::TextEditor& editor,
+        float fontHeight = 14.0f)
+    {
+        const auto font = FontBank::font (fontHeight);
+        editor.setFont (font);
+        editor.applyFontToAllText (font, true);
+        editor.setColour (
+            juce::TextEditor::backgroundColourId,
+            Palette::panel);
+        editor.setColour (
+            juce::TextEditor::textColourId,
+            Palette::text);
+        editor.applyColourToAllText (
+            Palette::text,
+            true);
+        editor.setColour (
+            juce::TextEditor::highlightColourId,
+            Palette::teal.withAlpha (0.30f));
+        editor.setColour (
+            juce::TextEditor::highlightedTextColourId,
+            Palette::text);
+        editor.setColour (
+            juce::TextEditor::outlineColourId,
+            Palette::stroke);
+        editor.setColour (
+            juce::TextEditor::focusedOutlineColourId,
+            Palette::teal);
+        editor.setColour (
+            juce::CaretComponent::caretColourId,
+            Palette::teal);
+    }
+
+    void configureThemedAlertWindow (
+        juce::AlertWindow& alert)
+    {
+        alert.setLookAndFeel (&dialogLookAndFeel());
+        alert.setColour (
+            juce::AlertWindow::backgroundColourId,
+            Palette::bg1);
+        alert.setColour (
+            juce::AlertWindow::textColourId,
+            Palette::text);
+        alert.setColour (
+            juce::AlertWindow::outlineColourId,
+            Palette::stroke);
+    }
+
     class AboutDialogContent final : public juce::Component
     {
     public:
-        AboutDialogContent (const juce::String& aboutText, const juce::String& changelogText, bool startExpanded)
+        AboutDialogContent (
+            const juce::String& aboutText,
+            const juce::String& changelogText,
+            bool startExpanded)
         {
+            setLookAndFeel (&dialogLookAndFeel());
+
             configureEditor (aboutEditor, aboutText);
             configureEditor (changelogEditor, changelogText);
             addAndMakeVisible (aboutEditor);
             addAndMakeVisible (changelogToggle);
             addAndMakeVisible (changelogEditor);
+
+            changelogToggle.setColour (
+                juce::TextButton::textColourOffId,
+                Palette::text);
+            changelogToggle.setColour (
+                juce::TextButton::textColourOnId,
+                Palette::text);
 
             changelogToggle.onClick = [this]
             {
@@ -24,42 +91,68 @@ namespace
             setExpanded (startExpanded);
         }
 
+        ~AboutDialogContent() override
+        {
+            setLookAndFeel (nullptr);
+        }
+
+        void paint (juce::Graphics& graphics) override
+        {
+            graphics.fillAll (Palette::bg0);
+        }
+
         void resized() override
         {
-            auto bounds = getLocalBounds().reduced (12);
-            aboutEditor.setBounds (bounds.removeFromTop (245));
-            bounds.removeFromTop (8);
-            changelogToggle.setBounds (bounds.removeFromTop (36));
-            bounds.removeFromTop (8);
+            auto bounds = getLocalBounds().reduced (14);
+            aboutEditor.setBounds (
+                bounds.removeFromTop (250));
+            bounds.removeFromTop (9);
+            changelogToggle.setBounds (
+                bounds.removeFromTop (38));
+            bounds.removeFromTop (9);
+
             if (expanded)
                 changelogEditor.setBounds (bounds);
         }
 
     private:
-        static void configureEditor (juce::TextEditor& editor, const juce::String& text)
+        static void configureEditor (
+            juce::TextEditor& editor,
+            const juce::String& text)
         {
             editor.setMultiLine (true);
             editor.setReadOnly (true);
             editor.setScrollbarsShown (true);
+            editor.setCaretVisible (false);
+            editor.setPopupMenuEnabled (true);
+            configureThemedTextEditor (editor, 13.5f);
             editor.setText (text, false);
-            editor.setColour (juce::TextEditor::backgroundColourId, Palette::bg1);
-            editor.setColour (juce::TextEditor::textColourId, Palette::text);
-            editor.setColour (juce::TextEditor::outlineColourId, Palette::stroke);
+            editor.moveCaretToTop (false);
         }
 
         void setExpanded (bool shouldExpand)
         {
             expanded = shouldExpand;
             changelogEditor.setVisible (expanded);
-            changelogToggle.setButtonText (expanded ? "Hide changelog" : "Show changelog");
-            setSize (660, expanded ? 600 : 330);
+            changelogToggle.setButtonText (
+                expanded
+                    ? "Hide changelog"
+                    : "Show changelog");
+            setSize (700, expanded ? 650 : 350);
             resized();
 
-            if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>())
-                dialog->setContentComponentSize (getWidth(), getHeight());
+            if (auto* dialog =
+                    findParentComponentOfClass<
+                        juce::DialogWindow>())
+            {
+                dialog->setContentComponentSize (
+                    getWidth(),
+                    getHeight());
+            }
         }
 
-        juce::TextEditor aboutEditor, changelogEditor;
+        juce::TextEditor aboutEditor;
+        juce::TextEditor changelogEditor;
         juce::TextButton changelogToggle;
         bool expanded = false;
     };
@@ -121,7 +214,7 @@ MotionFXAudioProcessorEditor::MotionFXAudioProcessorEditor (MotionFXAudioProcess
     addAndMakeVisible (content);
 
     titleLabel.setText ("MOTIONFX", juce::dontSendNotification);
-    titleLabel.setFont (FontBank::font (26.0f, true));
+    titleLabel.setFont (FontBank::fixedFont (27.0f, true));
     titleLabel.setColour (juce::Label::textColourId, Palette::teal);
     titleLabel.setTooltip ("About MotionFX");
     titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -320,7 +413,7 @@ void MotionFXAudioProcessorEditor::rebuildThemedControls()
 
     stutterPanel.reset();
 
-    titleLabel.setFont (FontBank::font (26.0f, true));
+    titleLabel.setFont (FontBank::fixedFont (27.0f, true));
     titleLabel.setColour (
         juce::Label::textColourId,
         Palette::teal);
@@ -558,7 +651,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.9.0 - Build 9
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.9.1 - Build 9.1
 
 Multi-effect modulation VST3.
 
@@ -578,7 +671,19 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.9.0 - Build 9
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.9.1 - Build 9.1
+- Retuned Groove Phase from the supplied reference IR, restoring its bounded stereo DC punch and cross-channel Pinch geometry.
+- Added clickable Gain, Frequency and Bandwidth fields plus a live spectrum behind both Groove Phase curves.
+- Corrected Soft post clipping so it remains transparent below its knee and audited zero-Drive transparency across every algorithm.
+- Unified labels, numbers and units on Atkinson Hyperlegible Next.
+- Themed About/Changelog, Accessibility and preset dialogs with the active MotionFX palette.
+- Fixed invisible About/Changelog text and mismatched scrollbars in the Light theme.
+- Kept the MotionFX title and Gain Match readable when Larger Interface Text is enabled.
+- Double-clicking a knob now restores its real parameter default.
+- Grouped straight, triplet and dotted sync divisions together and added matching Stutter beat separators.
+- Redrew Undo and Redo as clean return arrows with separated heads.
+
+0.9.0 - Build 9
 - Rebuilt the Drive engine with eight algorithms and true JUCE oversampling.
 - Added Groove Phase: a crackle-free, band-selective tracing and stereo Pinch distortion model.
 - Added draggable Tracing Model and Pinch X-Y controls with Alt/Option bandwidth editing.
@@ -652,14 +757,32 @@ Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 - Selected-effect identity preserved during reorder.
 - Gain Match naming update.)MFXCHANGELOG");
 
+    auto* contentComponent =
+        new AboutDialogContent (
+            aboutText,
+            changelogText,
+            openChangelog);
+
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new AboutDialogContent (aboutText, changelogText, openChangelog));
+    options.content.setOwned (contentComponent);
     options.dialogTitle = "About MotionFX";
     options.dialogBackgroundColour = Palette::bg0;
     options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
+    options.useNativeTitleBar = false;
     options.resizable = true;
-    options.launchAsync();
+    options.componentToCentreAround = this;
+
+    if (auto* dialog = options.launchAsync())
+    {
+        dialog->setLookAndFeel (&dialogLookAndFeel());
+        dialog->setColour (
+            juce::ResizableWindow::backgroundColourId,
+            Palette::bg0);
+        dialog->setColour (
+            juce::DocumentWindow::textColourId,
+            Palette::text);
+        dialog->sendLookAndFeelChange();
+    }
 }
 
 void MotionFXAudioProcessorEditor::showChangelogDialog()
@@ -746,6 +869,8 @@ void MotionFXAudioProcessorEditor::savePresetDialog()
         "Enter a preset name, optional folder and author metadata:",
         juce::MessageBoxIconType::NoIcon);
 
+    configureThemedAlertWindow (*alert);
+
     alert->addTextEditor (
         "name",
         processor.presetManager.getCurrentName() == "Init"
@@ -756,11 +881,23 @@ void MotionFXAudioProcessorEditor::savePresetDialog()
         "author",
         mfx::PresetManager::getDefaultAuthor());
 
+    for (const auto& editorId : {
+             juce::String ("name"),
+             juce::String ("folder"),
+             juce::String ("author")
+         })
+    {
+        if (auto* editor = alert->getTextEditor (editorId))
+            configureThemedTextEditor (*editor, 14.0f);
+    }
+
     alert->addButton (
-        "Save", 1,
+        "Save",
+        1,
         juce::KeyPress (juce::KeyPress::returnKey));
     alert->addButton (
-        "Cancel", 0,
+        "Cancel",
+        0,
         juce::KeyPress (juce::KeyPress::escapeKey));
 
     alert->enterModalState (
@@ -770,53 +907,105 @@ void MotionFXAudioProcessorEditor::savePresetDialog()
     {
         if (result == 1)
         {
-            const auto name = alert->getTextEditorContents ("name").trim();
-            const auto folder = alert->getTextEditorContents ("folder").trim();
-            const auto author = alert->getTextEditorContents ("author").trim();
+            const auto name =
+                alert->getTextEditorContents ("name").trim();
+            const auto folder =
+                alert->getTextEditorContents ("folder").trim();
+            const auto author =
+                alert->getTextEditorContents ("author").trim();
 
-            const bool saved = processor.presetManager.saveUserPreset (
-                name, folder, author);
+            const bool saved =
+                processor.presetManager.saveUserPreset (
+                    name,
+                    folder,
+                    author);
 
             showPresetLoadErrorIfAny();
 
             if (saved)
             {
                 if (processor.stateHistory != nullptr)
-                    processor.stateHistory->notifyExternalChange (
-                        "Preset saved");
+                {
+                    processor.stateHistory
+                        ->notifyExternalChange (
+                            "Preset saved");
+                }
+
                 refreshPresetLabel();
             }
         }
 
+        alert->setLookAndFeel (nullptr);
         alert.reset();
     }));
 }
 
 void MotionFXAudioProcessorEditor::createPresetFolderDialog()
 {
-    auto aw = std::make_shared<juce::AlertWindow> ("Create Preset Folder",
-        "Folder path relative to the preset library:", juce::MessageBoxIconType::NoIcon);
-    aw->addTextEditor ("folder", "User Made");
-    aw->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result) mutable
+    auto alert = std::make_shared<juce::AlertWindow> (
+        "Create Preset Folder",
+        "Folder path relative to the preset library:",
+        juce::MessageBoxIconType::NoIcon);
+
+    configureThemedAlertWindow (*alert);
+    alert->addTextEditor ("folder", "User Made");
+
+    if (auto* editor = alert->getTextEditor ("folder"))
+        configureThemedTextEditor (*editor, 14.0f);
+
+    alert->addButton (
+        "Create",
+        1,
+        juce::KeyPress (juce::KeyPress::returnKey));
+    alert->addButton (
+        "Cancel",
+        0,
+        juce::KeyPress (juce::KeyPress::escapeKey));
+
+    alert->enterModalState (
+        true,
+        juce::ModalCallbackFunction::create (
+            [this, alert] (int result) mutable
     {
         if (result == 1)
-            processor.presetManager.createPresetFolder (aw->getTextEditorContents ("folder").trim());
-        aw.reset();
+        {
+            processor.presetManager.createPresetFolder (
+                alert->getTextEditorContents (
+                    "folder").trim());
+        }
+
+        alert->setLookAndFeel (nullptr);
+        alert.reset();
     }));
 }
 
 void MotionFXAudioProcessorEditor::showPresetLoadErrorIfAny()
 {
-    const auto error = processor.presetManager.takeLastError();
+    const auto error =
+        processor.presetManager.takeLastError();
+
     if (error.isEmpty())
         return;
 
-    juce::AlertWindow::showMessageBoxAsync (
-        juce::MessageBoxIconType::WarningIcon,
+    auto alert = std::make_shared<juce::AlertWindow> (
         "MotionFX Preset",
-        error);
+        error,
+        juce::MessageBoxIconType::WarningIcon);
+
+    configureThemedAlertWindow (*alert);
+    alert->addButton (
+        "OK",
+        1,
+        juce::KeyPress (juce::KeyPress::returnKey));
+
+    alert->enterModalState (
+        true,
+        juce::ModalCallbackFunction::create (
+            [alert] (int) mutable
+    {
+        alert->setLookAndFeel (nullptr);
+        alert.reset();
+    }));
 }
 
 void MotionFXAudioProcessorEditor::showAccessibilityDialog()
@@ -832,16 +1021,29 @@ void MotionFXAudioProcessorEditor::showAccessibilityDialog()
                     safeThis->applyUiPreferences();
             });
 
-    contentComponent->setLookAndFeel (&lookAndFeel);
+    contentComponent->setLookAndFeel (
+        &dialogLookAndFeel());
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (contentComponent);
     options.dialogTitle = "MotionFX Accessibility";
     options.dialogBackgroundColour = Palette::bg0;
     options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
+    options.useNativeTitleBar = false;
     options.resizable = false;
-    options.launchAsync();
+    options.componentToCentreAround = this;
+
+    if (auto* dialog = options.launchAsync())
+    {
+        dialog->setLookAndFeel (&dialogLookAndFeel());
+        dialog->setColour (
+            juce::ResizableWindow::backgroundColourId,
+            Palette::bg0);
+        dialog->setColour (
+            juce::DocumentWindow::textColourId,
+            Palette::text);
+        dialog->sendLookAndFeelChange();
+    }
 }
 
 void MotionFXAudioProcessorEditor::showOptionsMenu()

@@ -35,25 +35,48 @@ namespace mfx
             setColour (juce::TextButton::textColourOffId, Palette::text);
             setColour (juce::TextButton::textColourOnId, Palette::text);
             setColour (juce::Label::textColourId, Palette::text);
-            setColour (juce::TextEditor::backgroundColourId, Palette::bg1);
+            setColour (juce::TextEditor::backgroundColourId, Palette::panel);
             setColour (juce::TextEditor::textColourId, Palette::text);
+            setColour (juce::TextEditor::highlightColourId,
+                       Palette::teal.withAlpha (0.30f));
+            setColour (juce::TextEditor::highlightedTextColourId,
+                       Palette::text);
             setColour (juce::TextEditor::outlineColourId, Palette::stroke);
             setColour (juce::TextEditor::focusedOutlineColourId, Palette::teal);
+            setColour (juce::CaretComponent::caretColourId, Palette::teal);
+
+            setColour (juce::ScrollBar::backgroundColourId,
+                       Palette::panel.withAlpha (0.65f));
+            setColour (juce::ScrollBar::trackColourId,
+                       Palette::panelHi.withAlpha (0.72f));
+            setColour (juce::ScrollBar::thumbColourId,
+                       Palette::teal.withAlpha (0.88f));
+
+            setColour (juce::TooltipWindow::backgroundColourId, Palette::panelHi);
+            setColour (juce::TooltipWindow::textColourId, Palette::text);
+            setColour (juce::TooltipWindow::outlineColourId, Palette::stroke);
+
             setColour (juce::AlertWindow::backgroundColourId, Palette::bg1);
             setColour (juce::AlertWindow::textColourId, Palette::text);
             setColour (juce::AlertWindow::outlineColourId, Palette::stroke);
+            setColour (juce::DocumentWindow::textColourId, Palette::text);
         }
 
         juce::Typeface::Ptr getTypefaceForFont (
             const juce::Font& font) override
         {
-            auto typeface = font.isBold()
-                ? FontBank::boldTypeface()
-                : FontBank::regularTypeface();
+            if (font.getTypefaceName().containsIgnoreCase (
+                    "Atkinson"))
+            {
+                auto typeface = font.isBold()
+                    ? FontBank::boldTypeface()
+                    : FontBank::regularTypeface();
 
-            return typeface != nullptr
-                ? typeface
-                : juce::LookAndFeel_V4::getTypefaceForFont (font);
+                if (typeface != nullptr)
+                    return typeface;
+            }
+
+            return juce::LookAndFeel_V4::getTypefaceForFont (font);
         }
 
         static float adaptiveCornerRadius (
@@ -321,7 +344,12 @@ namespace mfx
                 16.0f,
                 bounds.getHeight() * 0.39f);
 
-            graphics.setFont (FontBank::font (fontSize, true));
+            const bool fixedGainMatch =
+                button.getButtonText() == "GAIN MATCH";
+            graphics.setFont (
+                fixedGainMatch
+                    ? FontBank::fixedFont (15.5f, true)
+                    : FontBank::font (fontSize, true));
             graphics.drawFittedText (
                 button.getButtonText(),
                 bounds.reduced (7.0f, 3.0f).toNearestInt(),
@@ -408,6 +436,22 @@ namespace mfx
                 12.5f,
                 maximum,
                 requested);
+
+            if (label.getText() == "MOTIONFX")
+            {
+                return FontBank::fixedFont (
+                    height,
+                    true);
+            }
+
+            if (dynamic_cast<juce::Slider*> (
+                    label.getParentComponent()) != nullptr
+                || (bool) label.getProperties()["mfxNumeric"])
+            {
+                return FontBank::numericFont (
+                    height,
+                    label.getFont().isBold());
+            }
 
             return FontBank::font (
                 height,

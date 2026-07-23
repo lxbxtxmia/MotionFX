@@ -82,60 +82,31 @@ namespace mfx
                 case HeaderIcon::Undo:
                 case HeaderIcon::Redo:
                 {
-                    const bool redo =
-                        icon == HeaderIcon::Redo;
-                    const float centreY =
-                        bounds.getCentreY();
+                    const bool redo = icon == HeaderIcon::Redo;
+                    const float direction = redo ? 1.0f : -1.0f;
                     const float tipX = redo
                         ? bounds.getRight() - 1.0f
                         : bounds.getX() + 1.0f;
-                    const float baseX = redo
-                        ? tipX - 7.0f
-                        : tipX + 7.0f;
-                    const float outerX = redo
-                        ? bounds.getX() + 2.0f
-                        : bounds.getRight() - 2.0f;
-
-                    juce::Path arrowHead;
-
-                    if (redo)
-                    {
-                        arrowHead.addTriangle (
-                            tipX,
-                            centreY,
-                            baseX,
-                            centreY - 5.0f,
-                            baseX,
-                            centreY + 5.0f);
-                    }
-                    else
-                    {
-                        arrowHead.addTriangle (
-                            tipX,
-                            centreY,
-                            baseX,
-                            centreY - 5.0f,
-                            baseX,
-                            centreY + 5.0f);
-                    }
-
-                    graphics.fillPath (arrowHead);
+                    const float arrowY = bounds.getCentreY() - 4.0f;
+                    const float baseX = tipX - direction * 7.0f;
+                    const float farX = redo
+                        ? bounds.getX() + 3.0f
+                        : bounds.getRight() - 3.0f;
+                    const float bottomY = bounds.getBottom() - 2.0f;
 
                     juce::Path shaft;
-                    const float shaftStart = redo
-                        ? baseX - 1.0f
-                        : baseX + 1.0f;
-
                     shaft.startNewSubPath (
-                        shaftStart,
-                        centreY);
-                    shaft.cubicTo (
-                        outerX,
-                        centreY,
-                        outerX,
-                        bounds.getY() + 2.0f,
-                        outerX,
-                        bounds.getBottom() - 2.0f);
+                        baseX - direction * 1.5f,
+                        arrowY);
+                    shaft.lineTo (farX, arrowY);
+                    shaft.quadraticTo (
+                        farX - direction * 3.0f,
+                        arrowY,
+                        farX - direction * 3.0f,
+                        arrowY + 3.0f);
+                    shaft.lineTo (
+                        farX - direction * 3.0f,
+                        bottomY);
 
                     graphics.strokePath (
                         shaft,
@@ -143,6 +114,16 @@ namespace mfx
                             2.2f,
                             juce::PathStrokeType::curved,
                             juce::PathStrokeType::rounded));
+
+                    juce::Path arrowHead;
+                    arrowHead.addTriangle (
+                        tipX,
+                        arrowY,
+                        baseX,
+                        arrowY - 5.0f,
+                        baseX,
+                        arrowY + 5.0f);
+                    graphics.fillPath (arrowHead);
                     return;
                 }
 

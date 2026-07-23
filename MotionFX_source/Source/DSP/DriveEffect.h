@@ -1,7 +1,9 @@
 #pragma once
 #include "DspUtils.h"
 #include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <memory>
 
@@ -128,6 +130,18 @@ namespace mfx
             for (auto& state : pinchBand)
                 state.reset();
 
+            pinchColour.reset();
+            grooveEnvelope = 0.0f;
+            spectrumWritePosition = 0;
+            spectrumSkipSamples = 0;
+            std::fill (
+                spectrumFftData.begin(),
+                spectrumFftData.end(),
+                0.0f);
+
+            for (auto& bin : spectrumUi)
+                bin.store (0.0f, std::memory_order_relaxed);
+
             lastEffectiveQuality = -1;
         }
 
@@ -142,6 +156,9 @@ namespace mfx
 
                 for (auto& state : pinchBand)
                     state.reset();
+
+                pinchColour.reset();
+                grooveEnvelope = 0.0f;
             }
         }
 
@@ -270,6 +287,15 @@ namespace mfx
             }
         }
 
+        static constexpr int spectrumBinCount = 48;
+        using SpectrumBins = std::array<
+            std::atomic<float>, spectrumBinCount>;
+
+        const SpectrumBins& getSpectrumBins() const noexcept
+        {
+            return spectrumUi;
+        }
+
         void processBlock (
             juce::AudioBuffer<float>& buffer,
             float driveAmount) noexcept
@@ -381,6 +407,8 @@ namespace mfx
                     data[sample] = flushDenorm (value);
                 }
             }
+
+            captureSpectrum (baseBlock);
         }
 
     private:
@@ -451,6 +479,36 @@ namespace mfx
             float state2 = 0.0f;
         };
 
+        struct OnePoleLowPass
+        {
+            void reset() noexcept
+            {
+                state = 0.0f;
+            }
+
+            float process (float input,
+                           float cutoffHz,
+                           float processingRate) noexcept
+            {
+                const float rate = juce::jmax (1.0f, processingRate);
+                const float cutoff = juce::jlimit (
+                    20.0f,
+                    rate * 0.45f,
+                    cutoffHz);
+                const float coefficient = std::exp (
+                    -2.0f
+                    * juce::MathConstants<float>::pi
+                    * cutoff
+                    / rate);
+
+                state = coefficient * state
+                      + (1.0f - coefficient) * input;
+                return state;
+            }
+
+            float state = 0.0f;
+        };
+
         static int factorForQuality (
             int qualityIndex) noexcept
         {
@@ -484,6 +542,37 @@ namespace mfx
             const float processingRate =
                 (float) sampleRate
                 * (float) oversamplingFactor;
+
+            const auto smoothingCoefficient = [processingRate] (
+                float timeMs)
+            {
+                return 1.0f - std::exp (
+                    -1.0f
+                    / (0.001f
+                       * timeMs
+                       * processingRate));
+            };
+
+            for (int channel = 0; channel < channels; ++channel)
+            {
+                driveSm[(size_t) channel].coeff =
+                    smoothingCoefficient (12.0f);
+                toneSm[(size_t) channel].coeff =
+                    smoothingCoefficient (18.0f);
+                biasSm[(size_t) channel].coeff =
+                    smoothingCoefficient (18.0f);
+            }
+
+            if (mode == DriveMode::GroovePhase
+                && channels >= 2)
+            {
+                processGroovePhaseStereo (
+                    block,
+                    requestedDrive,
+                    processingRate);
+                return;
+            }
+
             const float dcCoefficient =
                 std::exp (
                     -2.0f
@@ -521,20 +610,13 @@ namespace mfx
                     const float biasValue =
                         biasSm[(size_t) channel].next();
 
-                    float wet = mode
-                        == DriveMode::GroovePhase
-                        ? processGroovePhase (
-                            input,
-                            channel,
-                            driveValue,
-                            processingRate)
-                        : processStandardMode (
-                            input,
-                            channel,
-                            driveValue,
-                            toneValue,
-                            biasValue,
-                            processingRate);
+                    float wet = processStandardMode (
+                        input,
+                        channel,
+                        driveValue,
+                        toneValue,
+                        biasValue,
+                        processingRate);
 
                     const float dcBlocked =
                         wet
@@ -756,94 +838,289 @@ namespace mfx
                     * (nonlinear - preShaped);
         }
 
-        float processGroovePhase (
-            float input,
-            int channel,
-            float amount,
+        void processGroovePhaseStereo (
+            juce::dsp::AudioBlock<float> block,
+            float requestedDrive,
             float processingRate) noexcept
         {
-            const float trace =
-                traceBand[(size_t) channel].process (
-                    input,
+            auto* left = block.getChannelPointer (0);
+            auto* right = block.getChannelPointer (1);
+            const int samples = (int) block.getNumSamples();
+
+            driveSm[0].setTarget (
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    requestedDrive));
+            driveSm[1].setTarget (
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    requestedDrive));
+
+            const float pinchCutoff =
+                juce::jlimit (
+                    80.0f,
+                    processingRate * 0.45f,
+                    pinchFrequencyHz
+                        * std::pow (
+                            2.0f,
+                            pinchBandwidth + 0.70f));
+
+            const float envelopeCoefficient = std::exp (
+                -1.0f
+                / juce::jmax (
+                    1.0f,
+                    processingRate * 0.012f));
+
+            for (int sample = 0;
+                 sample < samples;
+                 ++sample)
+            {
+                const float inputLeft = left[sample];
+                const float inputRight = right[sample];
+                const float driveValue = 0.5f
+                    * (driveSm[0].next()
+                       + driveSm[1].next());
+
+                const float traceControl =
+                    traceEnabled
+                        ? driveValue
+                            * juce::jlimit (
+                                0.0f,
+                                2.0f,
+                                traceGainDb / 12.0f)
+                        : 0.0f;
+                const float pinchControl =
+                    pinchEnabled
+                        ? driveValue
+                            * juce::jlimit (
+                                0.0f,
+                                2.0f,
+                                pinchGainDb / 12.0f)
+                        : 0.0f;
+
+                const float traceLeft = traceBand[0].process (
+                    inputLeft,
                     traceFrequencyHz,
                     traceBandwidth,
                     processingRate);
-            const float pinch =
-                pinchBand[(size_t) channel].process (
-                    input,
-                    pinchFrequencyHz,
-                    pinchBandwidth,
+                const float traceRight = traceBand[1].process (
+                    inputRight,
+                    traceFrequencyHz,
+                    traceBandwidth,
                     processingRate);
 
-            const float traceAmount =
-                traceEnabled
-                    ? amount
-                        * (traceGainDb / 24.0f)
-                    : 0.0f;
-            const float pinchAmount =
-                pinchEnabled
-                    ? amount
-                        * (pinchGainDb / 24.0f)
-                    : 0.0f;
+                const float traceShapeLeft =
+                    grooveRectifier (traceLeft)
+                    + 0.08f
+                        * (std::tanh (traceLeft * 4.0f)
+                           - traceLeft);
+                const float traceShapeRight =
+                    grooveRectifier (traceRight)
+                    + 0.08f
+                        * (std::tanh (traceRight * 4.0f)
+                           - traceRight);
 
-            float evenHarmonics = 0.0f;
-            float oddHarmonics = 0.0f;
+                // Geometric playback couples the two groove walls.  Using
+                // the Mid source and injecting opposite polarities recreates
+                // the measured cross-channel Pinch response while leaving the
+                // original stereo input intact.
+                const float mid =
+                    0.5f * (inputLeft + inputRight);
+                const float colouredPinch =
+                    pinchColour.process (
+                        mid,
+                        pinchCutoff,
+                        processingRate);
 
-            if (grooveCharacter
-                == GrooveCharacter::Soft)
-            {
-                // Full-wave-like tracing produces a smooth even-harmonic
-                // component; the DC blocker removes the static offset.
-                evenHarmonics =
-                    std::sqrt (
-                        trace * trace + 0.0025f)
-                    - 0.05f;
+                grooveEnvelope =
+                    envelopeCoefficient * grooveEnvelope
+                    + (1.0f - envelopeCoefficient)
+                        * std::abs (colouredPinch);
 
-                const float pinchDriven =
-                    pinch * (2.0f + 5.0f * amount);
-                oddHarmonics =
-                    std::tanh (pinchDriven)
-                    - pinch;
+                float pinchShape =
+                    grooveRectifier (colouredPinch);
+
+                const float oddResidual =
+                    grooveCharacter == GrooveCharacter::Hard
+                        ? juce::jlimit (
+                              -1.0f,
+                              1.0f,
+                              colouredPinch * 8.0f)
+                              - colouredPinch
+                        : std::tanh (
+                              colouredPinch * 4.0f)
+                              - colouredPinch;
+
+                pinchShape +=
+                    (grooveCharacter == GrooveCharacter::Hard
+                        ? 0.08f
+                        : 0.02f)
+                    * oddResidual;
+
+                // A Pinch value of 12 dB at full Drive intentionally maps to
+                // approximately one full-wave component for a single-channel
+                // source, matching the supplied reference sweep.  The safety
+                // envelope and absolute ceiling keep the useful DC punch from
+                // becoming an uncontrolled speaker offset.
+                const float safeComponentLimit = juce::jmin (
+                    0.35f,
+                    0.01f + grooveEnvelope * 4.0f);
+                const float pinchComponent = juce::jlimit (
+                    -safeComponentLimit,
+                    safeComponentLimit,
+                    pinchShape
+                        * pinchControl
+                        * 2.0f);
+
+                const float traceScale =
+                    grooveCharacter == GrooveCharacter::Hard
+                        ? 1.30f
+                        : 1.05f;
+                const float traceComponentLeft = juce::jlimit (
+                    -0.30f,
+                    0.30f,
+                    traceShapeLeft
+                        * traceControl
+                        * traceScale);
+                const float traceComponentRight = juce::jlimit (
+                    -0.30f,
+                    0.30f,
+                    traceShapeRight
+                        * traceControl
+                        * traceScale);
+
+                float outputLeft =
+                    inputLeft
+                    + traceComponentLeft
+                    + pinchComponent;
+                float outputRight =
+                    inputRight
+                    + traceComponentRight
+                    + (stereoPinch
+                        ? -pinchComponent
+                        : pinchComponent);
+
+                if (postClip == DrivePostClip::TruePeak)
+                {
+                    outputLeft = truePeakCurve (outputLeft);
+                    outputRight = truePeakCurve (outputRight);
+                }
+
+                left[sample] = flushDenorm (outputLeft);
+                right[sample] = flushDenorm (outputRight);
             }
-            else
+        }
+
+        float grooveRectifier (float value) const noexcept
+        {
+            if (grooveCharacter == GrooveCharacter::Hard)
+                return std::abs (value);
+
+            constexpr float softness = 0.001f;
+            return std::sqrt (
+                       value * value
+                       + softness * softness)
+                 - softness;
+        }
+
+        void captureSpectrum (
+            juce::dsp::AudioBlock<float> block) noexcept
+        {
+            const int channels = (int) juce::jmin (
+                (size_t) 2,
+                block.getNumChannels());
+            const int samples = (int) block.getNumSamples();
+
+            if (channels <= 0 || samples <= 0)
+                return;
+
+            const auto* left = block.getChannelPointer (0);
+            const auto* right = channels > 1
+                ? block.getChannelPointer (1)
+                : left;
+
+            for (int sample = 0;
+                 sample < samples;
+                 ++sample)
             {
-                evenHarmonics =
-                    std::abs (trace);
+                if (spectrumSkipSamples > 0)
+                {
+                    --spectrumSkipSamples;
+                    continue;
+                }
 
-                const float pinchDriven =
-                    pinch * (3.0f + 9.0f * amount);
-                oddHarmonics =
-                    juce::jlimit (
-                        -1.0f,
-                        1.0f,
-                        pinchDriven)
-                    - pinch;
+                spectrumFftData[(size_t) spectrumWritePosition++] =
+                    0.5f * (left[sample] + right[sample]);
+
+                if (spectrumWritePosition < spectrumFftSize)
+                    continue;
+
+                for (int index = spectrumFftSize;
+                     index < spectrumFftSize * 2;
+                     ++index)
+                {
+                    spectrumFftData[(size_t) index] = 0.0f;
+                }
+
+                spectrumWindow.multiplyWithWindowingTable (
+                    spectrumFftData.data(),
+                    spectrumFftSize);
+                spectrumFft.performFrequencyOnlyForwardTransform (
+                    spectrumFftData.data());
+
+                const float highestFrequency = juce::jmin (
+                    20000.0f,
+                    (float) sampleRate * 0.45f);
+                constexpr float lowestFrequency = 30.0f;
+
+                for (int bin = 0;
+                     bin < spectrumBinCount;
+                     ++bin)
+                {
+                    const float position =
+                        (float) bin
+                        / (float) (spectrumBinCount - 1);
+                    const float frequency =
+                        lowestFrequency
+                        * std::pow (
+                            highestFrequency
+                                / lowestFrequency,
+                            position);
+                    const int fftIndex = juce::jlimit (
+                        1,
+                        spectrumFftSize / 2,
+                        (int) std::lround (
+                            frequency
+                            * (float) spectrumFftSize
+                            / (float) sampleRate));
+                    const float magnitude = juce::jmax (
+                        1.0e-9f,
+                        spectrumFftData[(size_t) fftIndex]
+                            / (float) spectrumFftSize);
+                    const float decibels = juce::Decibels
+                        ::gainToDecibels (
+                            magnitude,
+                            -84.0f);
+                    const float normalised = std::pow (
+                        juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            (decibels + 84.0f) / 84.0f),
+                        0.72f);
+                    const float previous = spectrumUi[(size_t) bin]
+                        .load (std::memory_order_relaxed);
+                    spectrumUi[(size_t) bin].store (
+                        juce::jmax (
+                            normalised,
+                            previous * 0.72f),
+                        std::memory_order_relaxed);
+                }
+
+                spectrumWritePosition = 0;
+                spectrumSkipSamples = spectrumFftSize * 2;
             }
-
-            float pinchPolarity = 1.0f;
-
-            if (stereoPinch
-                && channel == 1)
-            {
-                // The Pinch component is deliberately 180 degrees out of
-                // phase on the right channel to enrich the stereo image.
-                pinchPolarity = -1.0f;
-            }
-
-            const float modelled =
-                input
-                + evenHarmonics
-                    * traceAmount
-                    * 1.35f
-                + oddHarmonics
-                    * pinchAmount
-                    * pinchPolarity
-                    * 0.85f;
-
-            return juce::jlimit (
-                -3.0f,
-                3.0f,
-                modelled);
         }
 
         static float toneCoefficient (
@@ -903,11 +1180,25 @@ namespace mfx
             switch (clipMode)
             {
                 case DrivePostClip::Soft:
-                    return juce::jlimit (
-                        -1.0f,
-                        1.0f,
-                        std::tanh (value * 1.6f)
-                            / std::tanh (1.6f));
+                {
+                    constexpr float threshold = 0.82f;
+                    const float magnitude = std::abs (value);
+
+                    if (magnitude <= threshold)
+                        return value;
+
+                    const float normalised =
+                        (magnitude - threshold)
+                        / (1.0f - threshold);
+                    const float limited =
+                        threshold
+                        + (1.0f - threshold)
+                            * std::tanh (normalised);
+
+                    return std::copysign (
+                        juce::jmin (0.999f, limited),
+                        value);
+                }
 
                 case DrivePostClip::Hard:
                     return juce::jlimit (
@@ -972,6 +1263,22 @@ namespace mfx
 
         std::array<TptBandPass, 2> traceBand;
         std::array<TptBandPass, 2> pinchBand;
+        OnePoleLowPass pinchColour;
+        float grooveEnvelope = 0.0f;
+
+        static constexpr int spectrumFftOrder = 9;
+        static constexpr int spectrumFftSize =
+            1 << spectrumFftOrder;
+        juce::dsp::FFT spectrumFft { spectrumFftOrder };
+        juce::dsp::WindowingFunction<float> spectrumWindow {
+            spectrumFftSize,
+            juce::dsp::WindowingFunction<float>::hann,
+            true
+        };
+        std::array<float, spectrumFftSize * 2> spectrumFftData {};
+        SpectrumBins spectrumUi {};
+        int spectrumWritePosition = 0;
+        int spectrumSkipSamples = 0;
 
         int lastEffectiveQuality = -1;
     };

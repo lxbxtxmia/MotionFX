@@ -146,7 +146,8 @@ namespace mfx
 
                 drivePhasePanel =
                     std::make_unique<DrivePhasePanel> (
-                        apvts);
+                        apvts,
+                        chain.drive);
 
                 addAndMakeVisible (*driveQuality);
                 addAndMakeVisible (*drivePostClip);

@@ -141,6 +141,40 @@ public:
             }
         }
 
+        // Larger Text regression pass: branding and the fixed-width
+        // Gain Match control must stay renderable without truncation.
+        mfx::UiPreferences::instance().setThemeId ("builtin.light");
+        mfx::UiPreferences::instance().setHighContrast (false);
+        mfx::UiPreferences::instance().setLargerText (true);
+
+        {
+            auto processor =
+                std::make_unique<MotionFXAudioProcessor>();
+            processor->prepareToPlay (48000.0, 512);
+            auto editor =
+                std::make_unique<MotionFXAudioProcessorEditor> (*processor);
+            editor->setSize (1080, 720);
+
+            juce::Image image (
+                juce::Image::ARGB,
+                1080,
+                720,
+                true);
+            juce::Graphics graphics (image);
+            editor->paintEntireComponent (graphics, true);
+
+            const auto outputFile = snapshotDirectory.getChildFile (
+                "light_larger_text_100pct.png");
+            juce::PNGImageFormat png;
+            juce::FileOutputStream stream (outputFile);
+            if (stream.openedOk())
+            {
+                stream.setPosition (0);
+                stream.truncate();
+                png.writeImageToStream (image, stream);
+            }
+        }
+
         mfx::UiPreferences::instance().setThemeId (
             oldTheme);
         mfx::UiPreferences::instance().setHighContrast (

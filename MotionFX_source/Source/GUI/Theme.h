@@ -435,24 +435,47 @@ namespace mfx
 
         static juce::Font font (float height, bool bold = false)
         {
-            const float scaledHeight = height
-                * UiPreferences::instance().getTextScale();
+            return atkinsonFont (
+                height * UiPreferences::instance().getTextScale(),
+                bold);
+        }
+
+        // Branding and fixed-width header controls must not grow until they
+        // are truncated by the Larger Text accessibility option.
+        static juce::Font fixedFont (float height, bool bold = false)
+        {
+            return atkinsonFont (height, bold);
+        }
+
+        // Keep numeric readouts and symbols in the same embedded typeface as
+        // the rest of the interface. This preserves identical x-height,
+        // weight, spacing and accessibility characteristics across labels,
+        // values and units such as %, Hz, kHz, ms and dB.
+        static juce::Font numericFont (float height, bool bold = false)
+        {
+            return atkinsonFont (
+                height * UiPreferences::instance().getTextScale(),
+                bold);
+        }
+
+    private:
+        static juce::Font atkinsonFont (float height, bool bold)
+        {
             auto typeface = bold ? boldTypeface() : regularTypeface();
 
             if (typeface != nullptr)
             {
                 return juce::Font (
                     juce::FontOptions (typeface)
-                        .withHeight (scaledHeight));
+                        .withHeight (height));
             }
 
             return juce::Font (
                 juce::FontOptions (
-                    scaledHeight,
+                    height,
                     bold ? juce::Font::bold : juce::Font::plain));
         }
 
-    private:
         static juce::Typeface::Ptr loadTypeface (
             const juce::String& styleToken)
         {

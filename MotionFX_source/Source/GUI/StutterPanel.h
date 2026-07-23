@@ -206,6 +206,13 @@ namespace mfx
         {
             const int steps = (int) apvts.getRawParameterValue (
                 "stutter_numsteps")->load();
+            const int divisionIndex = juce::jlimit (
+                0,
+                syncDivCount - 1,
+                (int) apvts.getRawParameterValue (
+                    "stutter_div")->load());
+            const int groupSize = syncDivGroupSize (
+                (SyncDiv) divisionIndex);
 
             for (auto* grid : {
                      repeatGrid.get(), reverseGrid.get(),
@@ -213,9 +220,11 @@ namespace mfx
                  })
             {
                 grid->setNumSteps (steps);
+                grid->setGroupSize (groupSize);
             }
 
             pitchGrid->setNumSteps (steps);
+            pitchGrid->setGroupSize (groupSize);
             refreshGrids();
         }
 

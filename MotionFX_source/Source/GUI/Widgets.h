@@ -17,6 +17,11 @@ namespace mfx
             manualEntryCallback = std::move (callback);
         }
 
+        void setResetValue (double newResetValue) noexcept
+        {
+            resetValue = newResetValue;
+        }
+
         void setModulationDisplay (
             juce::RangedAudioParameter* parameterToUse,
             std::atomic<float>* currentValue,
@@ -100,7 +105,7 @@ namespace mfx
             }
 
             setValue (
-                0.0,
+                resetValue,
                 juce::sendNotificationSync);
         }
 
@@ -124,6 +129,7 @@ namespace mfx
         }
 
         std::function<void()> manualEntryCallback;
+        double resetValue = 0.0;
         juce::RangedAudioParameter* controlledParameter = nullptr;
         std::atomic<float>* currentModulation = nullptr;
         std::atomic<float>* modulationDepth = nullptr;
@@ -181,6 +187,14 @@ namespace mfx
             addAndMakeVisible (label);
 
             parameter = apvts.getParameter (paramId);
+
+            if (parameter != nullptr)
+            {
+                slider.setResetValue (
+                    parameter->convertFrom0to1 (
+                        parameter->getDefaultValue()));
+            }
+
             attachment = std::make_unique<
                 juce::AudioProcessorValueTreeState::SliderAttachment> (
                     apvts,
@@ -191,7 +205,7 @@ namespace mfx
 
             setTooltipText (
                 labelText
-                + " - double-click knob for zero; "
+                + " - double-click knob for its default; "
                   "click the value or double-click the label to type");
         }
 
@@ -990,6 +1004,11 @@ namespace mfx
             if (newCount != numSteps) { numSteps = newCount; repaint(); }
         }
         void setCurrentStepProvider (std::function<int()> provider) { currentStepProvider = std::move (provider); }
+        void setGroupSize (int stepsPerGroup)
+        {
+            const int newSize = juce::jlimit (1, 8, stepsPerGroup);
+            if (newSize != groupSize) { groupSize = newSize; repaint(); }
+        }
 
         void paint (juce::Graphics& graphics) override
         {
@@ -1019,6 +1038,16 @@ namespace mfx
                     graphics.setColour (Palette::bg0);
                     graphics.setFont (FontBank::font (juce::jmin (10.0f, cell.getHeight() * 0.24f)));
                     graphics.drawFittedText (choices[value], cell.toNearestInt().reduced (2), juce::Justification::centred, 1);
+                }
+
+                if (step > 0 && step % groupSize == 0)
+                {
+                    const float separatorX = bounds.getX() + step * cellWidth;
+                    graphics.setColour (accent.withAlpha (0.72f));
+                    graphics.drawVerticalLine (
+                        juce::roundToInt (separatorX),
+                        bounds.getY() + 2.0f,
+                        bounds.getBottom() - 2.0f);
                 }
             }
         }
@@ -1076,7 +1105,8 @@ namespace mfx
         juce::StringArray choices;
         juce::Colour accent;
         bool toggleMode = false, showChoiceText = false;
-        int numSteps = 16, lastPaintedStep = -1, paintValue = 1, lastNonZeroValue = 1;
+        int numSteps = 16, groupSize = 4;
+        int lastPaintedStep = -1, paintValue = 1, lastNonZeroValue = 1;
         std::function<int()> currentStepProvider;
     };
 
@@ -1101,6 +1131,11 @@ namespace mfx
             if (newCount != numSteps) { numSteps = newCount; repaint(); }
         }
         void setCurrentStepProvider (std::function<int()> provider) { currentStepProvider = std::move (provider); }
+        void setGroupSize (int stepsPerGroup)
+        {
+            const int newSize = juce::jlimit (1, 8, stepsPerGroup);
+            if (newSize != groupSize) { groupSize = newSize; repaint(); }
+        }
 
         static int semitonesFromDrag (int startSemitones, float verticalDelta, float pixelsPerSemitone) noexcept
         {
@@ -1137,12 +1172,22 @@ namespace mfx
                     {
                         const juce::String valueText = juce::String (semitones > 0 ? "+" : "") + juce::String (semitones);
                         graphics.setColour (Palette::text);
-                        graphics.setFont (FontBank::font (juce::jmin (10.0f, cell.getHeight() * 0.23f), true));
+                        graphics.setFont (FontBank::numericFont (juce::jmin (10.0f, cell.getHeight() * 0.23f), true));
                         graphics.drawFittedText (valueText, cell.toNearestInt().reduced (1), juce::Justification::centred, 1);
                     }
                 }
                 graphics.setColour (step == currentStep ? accent.withAlpha (0.95f) : Palette::stroke);
                 graphics.drawRoundedRectangle (cell, 3.0f, step == currentStep ? 1.5f : 1.0f);
+
+                if (step > 0 && step % groupSize == 0)
+                {
+                    const float separatorX = bounds.getX() + step * cellWidth;
+                    graphics.setColour (accent.withAlpha (0.72f));
+                    graphics.drawVerticalLine (
+                        juce::roundToInt (separatorX),
+                        bounds.getY() + 2.0f,
+                        bounds.getBottom() - 2.0f);
+                }
             }
         }
 
@@ -1218,7 +1263,8 @@ namespace mfx
         juce::AudioProcessorValueTreeState& apvts;
         juce::String activePrefix, semitonePrefix;
         juce::Colour accent;
-        int numSteps = 16, pressStep = -1, lastEditedStep = -1, dragStartSemitones = 0;
+        int numSteps = 16, groupSize = 4;
+        int pressStep = -1, lastEditedStep = -1, dragStartSemitones = 0;
         float pressY = 0.0f;
         bool erasing = false, dragged = false;
         std::function<int()> currentStepProvider;

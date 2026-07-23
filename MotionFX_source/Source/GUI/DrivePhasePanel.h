@@ -5,203 +5,441 @@
 
 namespace mfx
 {
+    class EditableParameterLabel final : public juce::Label
+    {
+    public:
+        enum class Unit
+        {
+            Decibels,
+            Frequency,
+            Bandwidth
+        };
+
+        EditableParameterLabel (
+            juce::RangedAudioParameter* parameterToUse,
+            std::atomic<float>* valueToUse,
+            Unit unitToUse)
+            : parameter (parameterToUse),
+              value (valueToUse),
+              unit (unitToUse)
+        {
+            getProperties().set ("mfxNumeric", true);
+            setEditable (true, true, false);
+            setJustificationType (juce::Justification::centred);
+            setColour (juce::Label::textColourId, Palette::text);
+            setColour (juce::Label::backgroundColourId,
+                       juce::Colours::transparentBlack);
+            setColour (juce::Label::outlineColourId,
+                       juce::Colours::transparentBlack);
+            setColour (juce::Label::textWhenEditingColourId,
+                       Palette::text);
+            setColour (juce::Label::backgroundWhenEditingColourId,
+                       Palette::panelHi);
+            setColour (juce::Label::outlineWhenEditingColourId,
+                       Palette::teal);
+            setFont (FontBank::numericFont (11.0f, true));
+            setTooltip ("Click to type a value. Double-click resets this field to its default.");
+
+            onTextChange = [this]
+            {
+                if (updatingText || parameter == nullptr)
+                    return;
+
+                const double parsed = parseText (getText());
+                const auto range = parameter->getNormalisableRange();
+                const float rawValue = (float) juce::jlimit (
+                    (double) range.start,
+                    (double) range.end,
+                    parsed);
+
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost (
+                    parameter->convertTo0to1 (rawValue));
+                parameter->endChangeGesture();
+            };
+
+            refresh();
+        }
+
+        void refresh()
+        {
+            if (isBeingEdited() || value == nullptr)
+                return;
+
+            updatingText = true;
+            setText (formatValue (
+                         value->load (std::memory_order_relaxed)),
+                     juce::dontSendNotification);
+            updatingText = false;
+        }
+
+        void mouseDoubleClick (
+            const juce::MouseEvent& event) override
+        {
+            if (parameter != nullptr)
+            {
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost (
+                    parameter->getDefaultValue());
+                parameter->endChangeGesture();
+                refresh();
+            }
+
+            juce::ignoreUnused (event);
+        }
+
+    private:
+        juce::String formatValue (float rawValue) const
+        {
+            switch (unit)
+            {
+                case Unit::Decibels:
+                    return ValueFormatting::compactDecimal (
+                               rawValue,
+                               rawValue < 10.0f ? 1 : 0)
+                        + " dB";
+
+                case Unit::Frequency:
+                    return ValueFormatting::frequencyHz (
+                        rawValue,
+                        false);
+
+                case Unit::Bandwidth:
+                    return "B "
+                        + ValueFormatting::compactDecimal (
+                            rawValue,
+                            2);
+            }
+
+            return {};
+        }
+
+        double parseText (juce::String text) const
+        {
+            switch (unit)
+            {
+                case Unit::Decibels:
+                    return text.getDoubleValue();
+
+                case Unit::Frequency:
+                    return ValueFormatting::parseEngineeringValue (
+                        text);
+
+                case Unit::Bandwidth:
+                    return text
+                        .removeCharacters ("Bb")
+                        .trim()
+                        .getDoubleValue();
+            }
+
+            return 0.0;
+        }
+
+        juce::RangedAudioParameter* parameter = nullptr;
+        std::atomic<float>* value = nullptr;
+        Unit unit = Unit::Bandwidth;
+        bool updatingText = false;
+    };
+
     class DriveBandPad final : public juce::Component,
                                public juce::SettableTooltipClient
     {
     public:
         DriveBandPad (
             juce::AudioProcessorValueTreeState& state,
+            DriveEffect& driveEffect,
             juce::String titleToUse,
             juce::String enableParameterId,
             juce::String gainParameterId,
             juce::String frequencyParameterId,
             juce::String bandwidthParameterId,
             juce::Colour accentToUse)
-            : title (std::move (titleToUse)),
-              accent (accentToUse)
+            : drive (driveEffect),
+              title (std::move (titleToUse)),
+              accent (accentToUse),
+              gainLabel (
+                  state.getParameter (gainParameterId),
+                  state.getRawParameterValue (gainParameterId),
+                  EditableParameterLabel::Unit::Decibels),
+              frequencyLabel (
+                  state.getParameter (frequencyParameterId),
+                  state.getRawParameterValue (frequencyParameterId),
+                  EditableParameterLabel::Unit::Frequency),
+              bandwidthLabel (
+                  state.getParameter (bandwidthParameterId),
+                  state.getRawParameterValue (bandwidthParameterId),
+                  EditableParameterLabel::Unit::Bandwidth)
         {
-            enabledValue =
-                state.getRawParameterValue (
-                    enableParameterId);
-            gainValue =
-                state.getRawParameterValue (
-                    gainParameterId);
-            frequencyValue =
-                state.getRawParameterValue (
-                    frequencyParameterId);
-            bandwidthValue =
-                state.getRawParameterValue (
-                    bandwidthParameterId);
+            enabledValue = state.getRawParameterValue (
+                enableParameterId);
+            gainValue = state.getRawParameterValue (
+                gainParameterId);
+            frequencyValue = state.getRawParameterValue (
+                frequencyParameterId);
+            bandwidthValue = state.getRawParameterValue (
+                bandwidthParameterId);
 
-            enabledParameter =
-                state.getParameter (
-                    enableParameterId);
-            gainParameter =
-                state.getParameter (
-                    gainParameterId);
-            frequencyParameter =
-                state.getParameter (
-                    frequencyParameterId);
-            bandwidthParameter =
-                state.getParameter (
-                    bandwidthParameterId);
+            gainParameter = state.getParameter (
+                gainParameterId);
+            frequencyParameter = state.getParameter (
+                frequencyParameterId);
+            bandwidthParameter = state.getParameter (
+                bandwidthParameterId);
+
+            addAndMakeVisible (gainLabel);
+            addAndMakeVisible (frequencyLabel);
+            addAndMakeVisible (bandwidthLabel);
 
             setTooltip (
                 title
-                + ": drag horizontally for frequency, "
-                  "vertically for gain, and Alt/Option-drag "
-                  "vertically for bandwidth.");
-            setMouseCursor (
-                juce::MouseCursor::CrosshairCursor);
+                + ": horizontal drag changes frequency, vertical drag changes gain, "
+                  "and Alt/Option + vertical drag changes bandwidth. "
+                  "Click a value below the graph to type it.");
+            setMouseCursor (juce::MouseCursor::CrosshairCursor);
         }
 
-        void paint (
-            juce::Graphics& graphics) override
+        void refreshValueLabels()
         {
-            auto bounds =
-                getLocalBounds().toFloat();
-            auto titleArea =
-                bounds.removeFromTop (22.0f);
-            auto valueArea =
-                bounds.removeFromBottom (22.0f);
-            auto graph =
-                bounds.reduced (5.0f, 3.0f);
+            gainLabel.refresh();
+            frequencyLabel.refresh();
+            bandwidthLabel.refresh();
+        }
 
-            const bool enabled =
-                enabledValue != nullptr
-                && enabledValue->load (
-                    std::memory_order_relaxed)
-                    > 0.5f;
+        void resized() override
+        {
+            auto bounds = getLocalBounds();
+            bounds.removeFromTop (22);
+            auto values = bounds.removeFromBottom (24);
 
-            graphics.setColour (
-                enabled
-                    ? accent
-                    : Palette::textDim);
-            graphics.setFont (
-                FontBank::font (11.5f, true));
+            const int gainWidth = juce::roundToInt (
+                values.getWidth() * 0.27f);
+            const int bandwidthWidth = juce::roundToInt (
+                values.getWidth() * 0.25f);
+
+            gainLabel.setBounds (values.removeFromLeft (gainWidth));
+            bandwidthLabel.setBounds (
+                values.removeFromRight (bandwidthWidth));
+            frequencyLabel.setBounds (values);
+        }
+
+        void paint (juce::Graphics& graphics) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            auto titleArea = bounds.removeFromTop (22.0f);
+            bounds.removeFromBottom (24.0f);
+            auto graph = bounds.reduced (5.0f, 3.0f);
+
+            const bool enabled = enabledValue != nullptr
+                && enabledValue->load (std::memory_order_relaxed) > 0.5f;
+
+            graphics.setColour (enabled ? accent : Palette::textDim);
+            graphics.setFont (FontBank::font (11.5f, true));
             graphics.drawText (
                 title,
                 titleArea.toNearestInt(),
                 juce::Justification::centredLeft);
 
-            graphics.setColour (
-                Palette::panel.withAlpha (0.90f));
-            graphics.fillRoundedRectangle (
-                graph,
-                5.0f);
+            graphics.setColour (Palette::panel.withAlpha (0.90f));
+            graphics.fillRoundedRectangle (graph, 5.0f);
 
-            graphics.setColour (
-                Palette::stroke.withAlpha (0.78f));
+            drawSpectrum (graphics, graph);
+            drawGrid (graphics, graph);
+            drawBandCurve (graphics, graph, enabled);
+
+            graphics.setColour (Palette::stroke.withAlpha (0.86f));
             graphics.drawRoundedRectangle (
                 graph,
                 5.0f,
                 1.0f);
+        }
 
-            graphics.setColour (
-                Palette::stroke.withAlpha (0.32f));
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            if (! graphBounds().contains (event.position))
+                return;
 
-            for (int index = 1;
-                 index < 8;
-                 ++index)
+            beginGestures();
+            dragStart = event.position;
+            startBandwidthNormalised = bandwidthParameter != nullptr
+                ? bandwidthParameter->getValue()
+                : 0.5f;
+            updateFromEvent (event);
+        }
+
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            if (gestureActive)
+                updateFromEvent (event);
+        }
+
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            endGestures();
+        }
+
+        void mouseDoubleClick (const juce::MouseEvent& event) override
+        {
+            if (! graphBounds().contains (event.position))
+                return;
+
+            resetParameter (gainParameter);
+            resetParameter (frequencyParameter);
+            resetParameter (bandwidthParameter);
+            refreshValueLabels();
+            repaint();
+        }
+
+    private:
+        static constexpr float lowestDisplayFrequency = 30.0f;
+        static constexpr float highestDisplayFrequency = 20000.0f;
+
+        juce::Rectangle<float> graphBounds() const
+        {
+            auto bounds = getLocalBounds().toFloat();
+            bounds.removeFromTop (22.0f);
+            bounds.removeFromBottom (24.0f);
+            return bounds.reduced (5.0f, 3.0f);
+        }
+
+        static float frequencyToNormalised (float frequency) noexcept
+        {
+            const float safe = juce::jlimit (
+                lowestDisplayFrequency,
+                highestDisplayFrequency,
+                frequency);
+            return std::log (safe / lowestDisplayFrequency)
+                / std::log (highestDisplayFrequency / lowestDisplayFrequency);
+        }
+
+        static float normalisedToFrequency (float normalised) noexcept
+        {
+            return lowestDisplayFrequency
+                * std::pow (
+                    highestDisplayFrequency / lowestDisplayFrequency,
+                    juce::jlimit (0.0f, 1.0f, normalised));
+        }
+
+        static float readRaw (std::atomic<float>* value) noexcept
+        {
+            return value != nullptr
+                ? value->load (std::memory_order_relaxed)
+                : 0.0f;
+        }
+
+        void drawGrid (juce::Graphics& graphics,
+                       juce::Rectangle<float> graph)
+        {
+            graphics.setColour (Palette::stroke.withAlpha (0.30f));
+
+            for (float frequency : {
+                     50.0f, 100.0f, 200.0f, 500.0f,
+                     1000.0f, 2000.0f, 5000.0f, 10000.0f
+                 })
             {
-                const float x =
-                    graph.getX()
-                    + graph.getWidth()
-                        * (float) index
-                        / 8.0f;
+                const float x = graph.getX()
+                    + frequencyToNormalised (frequency)
+                        * graph.getWidth();
                 graphics.drawVerticalLine (
-                    (int) std::lround (x),
+                    juce::roundToInt (x),
                     graph.getY(),
                     graph.getBottom());
             }
 
-            for (int index = 1;
-                 index < 4;
-                 ++index)
+            for (int index = 1; index < 4; ++index)
             {
-                const float y =
-                    graph.getY()
-                    + graph.getHeight()
-                        * (float) index
-                        / 4.0f;
+                const float y = graph.getY()
+                    + graph.getHeight() * (float) index / 4.0f;
                 graphics.drawHorizontalLine (
-                    (int) std::lround (y),
+                    juce::roundToInt (y),
                     graph.getX(),
                     graph.getRight());
             }
+        }
 
-            const float gain =
-                readRaw (gainValue);
-            const float frequency =
-                readRaw (frequencyValue);
-            const float bandwidth =
-                readRaw (bandwidthValue);
+        void drawSpectrum (juce::Graphics& graphics,
+                           juce::Rectangle<float> graph)
+        {
+            const auto& bins = drive.getSpectrumBins();
+            juce::Path outline;
 
-            const float frequencyNormalised =
-                frequencyParameter != nullptr
-                    ? frequencyParameter
-                        ->convertTo0to1 (
-                            frequency)
-                    : 0.5f;
-            const float gainNormalised =
-                gainParameter != nullptr
-                    ? gainParameter
-                        ->convertTo0to1 (
-                            gain)
-                    : 0.0f;
-            const float bandwidthNormalised =
-                bandwidthParameter != nullptr
-                    ? bandwidthParameter
-                        ->convertTo0to1 (
-                            bandwidth)
-                    : 0.5f;
-
-            const auto point =
-                juce::Point<float> (
-                    graph.getX()
-                        + frequencyNormalised
-                            * graph.getWidth(),
-                    graph.getBottom()
-                        - gainNormalised
-                            * graph.getHeight());
-
-            juce::Path curve;
-            const float spread =
-                juce::jmap (
-                    bandwidthNormalised,
+            for (int bin = 0;
+                 bin < DriveEffect::spectrumBinCount;
+                 ++bin)
+            {
+                const float x = graph.getX()
+                    + graph.getWidth()
+                        * (float) bin
+                        / (float) (DriveEffect::spectrumBinCount - 1);
+                const float magnitude = juce::jlimit (
                     0.0f,
                     1.0f,
-                    0.045f,
-                    0.34f);
+                    bins[(size_t) bin].load (
+                        std::memory_order_relaxed));
+                const float y = graph.getBottom()
+                    - magnitude * graph.getHeight() * 0.82f;
 
-            for (int index = 0;
-                 index <= 96;
-                 ++index)
+                if (bin == 0)
+                    outline.startNewSubPath (x, y);
+                else
+                    outline.lineTo (x, y);
+            }
+
+            juce::Path fill (outline);
+            fill.lineTo (graph.getRight(), graph.getBottom());
+            fill.lineTo (graph.getX(), graph.getBottom());
+            fill.closeSubPath();
+
+            graphics.setColour (accent.withAlpha (0.075f));
+            graphics.fillPath (fill);
+            graphics.setColour (Palette::textDim.withAlpha (0.22f));
+            graphics.strokePath (
+                outline,
+                juce::PathStrokeType (
+                    1.2f,
+                    juce::PathStrokeType::curved,
+                    juce::PathStrokeType::rounded));
+        }
+
+        void drawBandCurve (juce::Graphics& graphics,
+                            juce::Rectangle<float> graph,
+                            bool enabled)
+        {
+            const float gain = readRaw (gainValue);
+            const float frequency = readRaw (frequencyValue);
+            const float bandwidth = readRaw (bandwidthValue);
+            const float gainNormalised = gainParameter != nullptr
+                ? gainParameter->convertTo0to1 (gain)
+                : 0.0f;
+            const float q = juce::jmap (
+                juce::jlimit (0.20f, 4.0f, bandwidth),
+                0.20f,
+                4.0f,
+                5.0f,
+                0.35f);
+            const float centreY = graph.getCentreY();
+
+            juce::Path curve;
+
+            for (int index = 0; index <= 128; ++index)
             {
-                const float normalisedX =
-                    (float) index / 96.0f;
-                const float distance =
-                    normalisedX
-                    - frequencyNormalised;
-                const float gaussian =
-                    std::exp (
-                        -(distance * distance)
-                        / juce::jmax (
-                            0.0001f,
-                            spread * spread));
-                const float normalisedY =
-                    0.50f
-                    - gaussian
+                const float normalisedX = (float) index / 128.0f;
+                const float currentFrequency = normalisedToFrequency (
+                    normalisedX);
+                const float ratio = currentFrequency
+                    / juce::jmax (1.0f, frequency);
+                const float response = 1.0f
+                    / std::sqrt (
+                        1.0f
+                        + std::pow (
+                            q * (ratio - 1.0f / ratio),
+                            2.0f));
+                const float x = graph.getX()
+                    + normalisedX * graph.getWidth();
+                const float y = centreY
+                    - response
                         * gainNormalised
+                        * graph.getHeight()
                         * 0.43f;
-                const float x =
-                    graph.getX()
-                    + normalisedX
-                        * graph.getWidth();
-                const float y =
-                    graph.getY()
-                    + normalisedY
-                        * graph.getHeight();
 
                 if (index == 0)
                     curve.startNewSubPath (x, y);
@@ -209,9 +447,8 @@ namespace mfx
                     curve.lineTo (x, y);
             }
 
-            graphics.setColour (
-                accent.withAlpha (
-                    enabled ? 0.96f : 0.34f));
+            graphics.setColour (accent.withAlpha (
+                enabled ? 0.98f : 0.34f));
             graphics.strokePath (
                 curve,
                 juce::PathStrokeType (
@@ -219,116 +456,38 @@ namespace mfx
                     juce::PathStrokeType::curved,
                     juce::PathStrokeType::rounded));
 
-            graphics.setColour (
-                enabled
-                    ? accent
-                    : Palette::textDim);
+            const float pointX = graph.getX()
+                + frequencyToNormalised (frequency)
+                    * graph.getWidth();
+            const float pointY = centreY
+                - gainNormalised
+                    * graph.getHeight()
+                    * 0.43f;
+
+            graphics.setColour (enabled ? accent : Palette::textDim);
             graphics.fillEllipse (
-                point.x - 4.5f,
-                point.y - 4.5f,
+                pointX - 4.5f,
+                pointY - 4.5f,
                 9.0f,
                 9.0f);
-
-            graphics.setColour (
-                Palette::text);
-            graphics.setFont (
-                FontBank::font (10.5f, true));
-
-            const auto gainText =
-                ValueFormatting::compactDecimal (
-                    gain,
-                    gain < 10.0f ? 1 : 0)
-                + " dB";
-            const auto frequencyText =
-                ValueFormatting::frequencyHz (
-                    frequency,
-                    false);
-            const auto bandwidthText =
-                "B "
-                + ValueFormatting::compactDecimal (
-                    bandwidth,
-                    2);
-
-            auto first =
-                valueArea.removeFromLeft (
-                    (int) (valueArea.getWidth()
-                           * 0.27f));
-            auto last =
-                valueArea.removeFromRight (
-                    (int) (valueArea.getWidth()
-                           * 0.25f));
-
-            graphics.drawText (
-                gainText,
-                first.toNearestInt(),
-                juce::Justification::centredLeft);
-            graphics.drawText (
-                frequencyText,
-                valueArea.toNearestInt(),
-                juce::Justification::centred);
-            graphics.drawText (
-                bandwidthText,
-                last.toNearestInt(),
-                juce::Justification::centredRight);
         }
 
-        void mouseDown (
-            const juce::MouseEvent& event) override
-        {
-            beginGestures();
-            dragStart = event.position;
-            startBandwidthNormalised =
-                bandwidthParameter != nullptr
-                    ? bandwidthParameter->getValue()
-                    : 0.5f;
-            updateFromEvent (event);
-        }
-
-        void mouseDrag (
-            const juce::MouseEvent& event) override
-        {
-            updateFromEvent (event);
-        }
-
-        void mouseUp (
-            const juce::MouseEvent&) override
-        {
-            endGestures();
-        }
-
-        void mouseDoubleClick (
-            const juce::MouseEvent&) override
-        {
-            resetParameter (gainParameter);
-            resetParameter (frequencyParameter);
-            resetParameter (bandwidthParameter);
-            repaint();
-        }
-
-    private:
-        static float readRaw (
-            std::atomic<float>* value) noexcept
-        {
-            return value != nullptr
-                ? value->load (
-                    std::memory_order_relaxed)
-                : 0.0f;
-        }
-
-        static void resetParameter (
-            juce::RangedAudioParameter* parameter)
+        static void resetParameter (juce::RangedAudioParameter* parameter)
         {
             if (parameter == nullptr)
                 return;
 
             parameter->beginChangeGesture();
-            parameter->setValueNotifyingHost (
-                parameter->getDefaultValue());
+            parameter->setValueNotifyingHost (parameter->getDefaultValue());
             parameter->endChangeGesture();
         }
 
         void beginGestures()
         {
+            if (gestureActive)
+                return;
+
+            gestureActive = true;
             for (auto* parameter : {
                      gainParameter,
                      frequencyParameter,
@@ -342,6 +501,9 @@ namespace mfx
 
         void endGestures()
         {
+            if (! gestureActive)
+                return;
+
             for (auto* parameter : {
                      gainParameter,
                      frequencyParameter,
@@ -351,101 +513,93 @@ namespace mfx
                 if (parameter != nullptr)
                     parameter->endChangeGesture();
             }
+
+            gestureActive = false;
         }
 
-        void updateFromEvent (
-            const juce::MouseEvent& event)
+        void updateFromEvent (const juce::MouseEvent& event)
         {
-            auto graph =
-                getLocalBounds()
-                    .toFloat()
-                    .withTrimmedTop (22.0f)
-                    .withTrimmedBottom (22.0f)
-                    .reduced (5.0f, 3.0f);
+            const auto graph = graphBounds();
 
             if (event.mods.isAltDown())
             {
                 if (bandwidthParameter != nullptr)
                 {
-                    const float delta =
-                        (dragStart.y
-                         - event.position.y)
-                        / juce::jmax (
+                    const float delta = (dragStart.y - event.position.y)
+                        / juce::jmax (1.0f, graph.getHeight());
+                    bandwidthParameter->setValueNotifyingHost (
+                        juce::jlimit (
+                            0.0f,
                             1.0f,
-                            graph.getHeight());
-
-                    bandwidthParameter
-                        ->setValueNotifyingHost (
-                            juce::jlimit (
-                                0.0f,
-                                1.0f,
-                                startBandwidthNormalised
-                                    + delta));
+                            startBandwidthNormalised + delta));
                 }
             }
             else
             {
                 if (frequencyParameter != nullptr)
                 {
-                    frequencyParameter
-                        ->setValueNotifyingHost (
+                    const float normalisedX = juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        (event.position.x - graph.getX())
+                            / juce::jmax (1.0f, graph.getWidth()));
+                    const float rawFrequency = normalisedToFrequency (
+                        normalisedX);
+                    frequencyParameter->setValueNotifyingHost (
+                        frequencyParameter->convertTo0to1 (
                             juce::jlimit (
-                                0.0f,
-                                1.0f,
-                                (event.position.x
-                                 - graph.getX())
-                                / juce::jmax (
-                                    1.0f,
-                                    graph.getWidth())));
+                                frequencyParameter->getNormalisableRange().start,
+                                frequencyParameter->getNormalisableRange().end,
+                                rawFrequency)));
                 }
 
                 if (gainParameter != nullptr)
                 {
-                    gainParameter
-                        ->setValueNotifyingHost (
-                            juce::jlimit (
-                                0.0f,
-                                1.0f,
-                                (graph.getBottom()
-                                 - event.position.y)
-                                / juce::jmax (
-                                    1.0f,
-                                    graph.getHeight())));
+                    gainParameter->setValueNotifyingHost (
+                        juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            (graph.getBottom() - event.position.y)
+                                / juce::jmax (1.0f, graph.getHeight())));
                 }
             }
 
+            refreshValueLabels();
             repaint();
         }
 
+        DriveEffect& drive;
         juce::String title;
         juce::Colour accent;
+
+        EditableParameterLabel gainLabel;
+        EditableParameterLabel frequencyLabel;
+        EditableParameterLabel bandwidthLabel;
 
         std::atomic<float>* enabledValue = nullptr;
         std::atomic<float>* gainValue = nullptr;
         std::atomic<float>* frequencyValue = nullptr;
         std::atomic<float>* bandwidthValue = nullptr;
 
-        juce::RangedAudioParameter*
-            enabledParameter = nullptr;
-        juce::RangedAudioParameter*
-            gainParameter = nullptr;
-        juce::RangedAudioParameter*
-            frequencyParameter = nullptr;
-        juce::RangedAudioParameter*
-            bandwidthParameter = nullptr;
+        juce::RangedAudioParameter* gainParameter = nullptr;
+        juce::RangedAudioParameter* frequencyParameter = nullptr;
+        juce::RangedAudioParameter* bandwidthParameter = nullptr;
 
         juce::Point<float> dragStart;
         float startBandwidthNormalised = 0.5f;
+        bool gestureActive = false;
     };
 
     class DrivePhasePanel final : public juce::Component,
                                   private juce::Timer
     {
     public:
-        explicit DrivePhasePanel (
-            juce::AudioProcessorValueTreeState& state)
+        DrivePhasePanel (
+            juce::AudioProcessorValueTreeState& state,
+            DriveEffect& driveEffect)
             : tracePad (
                   state,
+                  driveEffect,
                   "TRACING MODEL",
                   "drive_trace_enabled",
                   "drive_trace_gain",
@@ -454,6 +608,7 @@ namespace mfx
                   Palette::orange),
               pinchPad (
                   state,
+                  driveEffect,
                   "PINCH",
                   "drive_pinch_enabled",
                   "drive_pinch_gain",
@@ -485,51 +640,32 @@ namespace mfx
             addAndMakeVisible (stereoPinch);
 
             character.combo.setTooltip (
-                "Soft gives smoother dubplate-like phase distortion. "
-                "Hard uses sharper tracing and pinch curves.");
+                "Soft gives a smoother dubplate-like rectification. Hard gives a sharper record-like geometric distortion.");
             stereoPinch.button.setTooltip (
-                "Invert the Pinch component on the right channel for a wider 180-degree stereo image.");
+                "Send the Pinch component to the right channel with opposite polarity for a realistic stereo groove image.");
 
-            startTimerHz (20);
+            startTimerHz (24);
         }
 
         void resized() override
         {
-            auto bounds =
-                getLocalBounds().reduced (5);
-            auto controls =
-                bounds.removeFromTop (52);
+            auto bounds = getLocalBounds().reduced (5);
+            auto controls = bounds.removeFromTop (52);
 
             const int gap = 8;
-            const int itemWidth =
-                (controls.getWidth()
-                 - gap * 3)
-                / 4;
+            const int itemWidth = (controls.getWidth() - gap * 3) / 4;
 
-            traceEnabled.setBounds (
-                controls.removeFromLeft (
-                    itemWidth));
+            traceEnabled.setBounds (controls.removeFromLeft (itemWidth));
             controls.removeFromLeft (gap);
-
-            pinchEnabled.setBounds (
-                controls.removeFromLeft (
-                    itemWidth));
+            pinchEnabled.setBounds (controls.removeFromLeft (itemWidth));
             controls.removeFromLeft (gap);
-
-            character.setBounds (
-                controls.removeFromLeft (
-                    itemWidth));
+            character.setBounds (controls.removeFromLeft (itemWidth));
             controls.removeFromLeft (gap);
-
             stereoPinch.setBounds (controls);
 
             bounds.removeFromTop (5);
-            const int padWidth =
-                (bounds.getWidth() - 10) / 2;
-
-            tracePad.setBounds (
-                bounds.removeFromLeft (
-                    padWidth));
+            const int padWidth = (bounds.getWidth() - 10) / 2;
+            tracePad.setBounds (bounds.removeFromLeft (padWidth));
             bounds.removeFromLeft (10);
             pinchPad.setBounds (bounds);
         }
@@ -537,6 +673,8 @@ namespace mfx
     private:
         void timerCallback() override
         {
+            tracePad.refreshValueLabels();
+            pinchPad.refreshValueLabels();
             tracePad.repaint();
             pinchPad.repaint();
         }

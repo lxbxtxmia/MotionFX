@@ -14,10 +14,17 @@ namespace mfx
     namespace idx
     {
         enum ModSrc { Off = 0, ModLfo = 1, Env = 2, Motion = 3, Seq = 4 };
-        enum Div { Bar4 = 0, Bar2 = 1, Bar1 = 2, D1_2 = 3, D1_4 = 4, D1_8 = 5, D1_8T = 6, D1_16 = 7, D1_16T = 8, D1_32 = 9 };
+        enum Div {
+            Bar4 = 0, Bar2 = 1, Bar1 = 2,
+            D1_2 = 3, D1_2T = 4, D1_2D = 5,
+            D1_4 = 6, D1_4T = 7, D1_4D = 8,
+            D1_8 = 9, D1_8T = 10, D1_8D = 11,
+            D1_16 = 12, D1_16T = 13, D1_16D = 14,
+            D1_32 = 15, D1_32T = 16, D1_32D = 17
+        };
         enum LfoShape { Sine = 0, Tri = 1, Sqr = 2, Saw = 3 };
         enum MotionShape { Pluck = 0, RiseFall = 1, Ramp = 2, Dip = 3, Flat = 4 };
-        enum DriveMode { Overdrive = 0, Tube = 1, SoftClip = 2, HardClip = 3, Vinyl = 4, PhaseDist = 5 };
+        enum DriveMode { Overdrive = 0, Tube = 1, SoftClip = 2, HardClip = 3, Tape = 4, Wavefold = 5, SinoidFold = 6, GroovePhase = 7 };
         enum PanMode { PanLinear = 0, PingPong = 1, Rotary = 2 };
         enum VolMode { VolLinear = 0, Exponential = 1, Gate = 2, Duck = 3 };
         enum SpaceMode { Plate = 0, Hall = 1, EchoDelay = 2, PanDelay = 3, GatedReverb = 4, TapeDelay = 5, Shimmer = 6 };
@@ -230,7 +237,7 @@ namespace mfx
         {
             FactoryPreset fp; fp.name = "Vinyl Dust";
             fp.overrides.push_back ({ "drive_enabled", 1.0f });
-            fp.overrides.push_back ({ "drive_mode", (float) Vinyl });
+            fp.overrides.push_back ({ "drive_mode", (float) Tape });
             fp.overrides.push_back ({ "drive_base", 35.0f });
             fp.overrides.push_back ({ "retro_enabled", 1.0f });
             fp.overrides.push_back ({ "retro_mode", (float) WearTear });
