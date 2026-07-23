@@ -1,5 +1,20 @@
 # MotionFX changelog
 
+## 0.9.0 - Build 9: Drive Lab
+
+- Rebuilt the Drive engine with eight distinct distortion algorithms.
+- Added Groove Phase, inspired by geometric groove playback distortion without crackle generation.
+- Groove Phase provides separate Tracing Model and Pinch gain, frequency and bandwidth controls.
+- Added Soft/Hard Groove character and Mono/Stereo Pinch phase modes.
+- Added separate Wavefold and Sinoid Fold algorithms.
+- Added Drive Bias for asymmetric saturation.
+- Added true JUCE IIR oversampling in Eco, 2x and 4x modes.
+- Added None, Soft, Hard and True Peak post processing.
+- True Peak forces 4x oversampling and reports the resulting latency to the host.
+- Added latency-compensated effect and master dry/wet mixing.
+- Redrew header arrows and increased normal and accessibility text sizes.
+- Added integrity and latency tests for every Drive mode, quality and post stage.
+
 ## 0.8.1 - UI refinement
 
 - Corrected Undo and Redo vector icons so the curve no longer crosses the arrow head.

@@ -25,7 +25,10 @@ namespace mfx
         "Drive", "Pan", "Volume", "Space", "Retro", "Width", "Filter"
     };
 
-    inline juce::StringArray driveModeChoices() { return { "Overdrive", "Tube", "Soft Clip", "Hard Clip", "Vinyl", "Phase Distort" }; }
+    inline juce::StringArray driveModeChoices() { return { "Overdrive", "Tube", "Soft Clip", "Hard Clip", "Tape", "Wavefold", "Sinoid Fold", "Groove Phase" }; }
+    inline juce::StringArray driveQualityChoices() { return { "Eco", "2x", "4x" }; }
+    inline juce::StringArray drivePostClipChoices() { return { "None", "Soft", "Hard", "True Peak" }; }
+    inline juce::StringArray grooveCharacterChoices() { return { "Soft", "Hard" }; }
     inline juce::StringArray panModeChoices() { return { "Linear", "Ping-Pong", "Rotary" }; }
     inline juce::StringArray volumeModeChoices() { return { "Linear", "Exponential", "Gate", "Duck" }; }
     inline juce::StringArray spaceModeChoices() { return { "Plate", "Hall", "Echo Delay", "Pan Delay", "Gated Reverb", "Tape Delay", "Shimmer" }; }
@@ -154,8 +157,23 @@ namespace mfx
             {
                 parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("drive_mode", 1), "Drive Mode", driveModeChoices(), 1));
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_tone", 1), "Drive Tone", juce::NormalisableRange<float> (-100.0f, 100.0f), 0.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_bias", 1), "Drive Bias", juce::NormalisableRange<float> (-100.0f, 100.0f), 0.0f));
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_mix", 1), "Drive Mix", juce::NormalisableRange<float> (0.0f, 100.0f), 100.0f));
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_outtrim", 1), "Drive Out Trim", juce::NormalisableRange<float> (-12.0f, 12.0f), 0.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("drive_quality", 1), "Drive Oversampling", driveQualityChoices(), 1));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("drive_postclip", 1), "Drive Post Clip", drivePostClipChoices(), 0));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID ("drive_trace_enabled", 1), "Tracing Model Enabled", true));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_trace_gain", 1), "Tracing Model Gain", juce::NormalisableRange<float> (0.0f, 24.0f), 6.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_trace_freq", 1), "Tracing Model Frequency", juce::NormalisableRange<float> (40.0f, 18000.0f, 0.0f, 0.35f), 684.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_trace_bandwidth", 1), "Tracing Model Bandwidth", juce::NormalisableRange<float> (0.20f, 4.0f), 0.32f));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID ("drive_pinch_enabled", 1), "Pinch Enabled", true));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_pinch_gain", 1), "Pinch Gain", juce::NormalisableRange<float> (0.0f, 24.0f), 6.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_pinch_freq", 1), "Pinch Frequency", juce::NormalisableRange<float> (40.0f, 18000.0f, 0.0f, 0.35f), 7500.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("drive_pinch_bandwidth", 1), "Pinch Bandwidth", juce::NormalisableRange<float> (0.20f, 4.0f), 3.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("drive_groove_character", 1), "Groove Character", grooveCharacterChoices(), 0));
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID ("drive_pinch_stereo", 1), "Pinch Stereo", true));
             }
             else if (prefix == "pan")
             {

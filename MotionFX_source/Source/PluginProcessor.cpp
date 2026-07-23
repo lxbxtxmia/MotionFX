@@ -110,7 +110,25 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
     {
         case EffectId::Drive:
             chain.drive.setMode ((mfx::DriveMode) (int) raw ("mode"));
-            chain.drive.setParams (raw ("tone") / 100.0f, raw ("mix") / 100.0f, raw ("outtrim"));
+            chain.drive.setParams (
+                raw ("tone") / 100.0f,
+                raw ("mix") / 100.0f,
+                raw ("outtrim"),
+                raw ("bias") / 100.0f,
+                (int) raw ("quality"),
+                (int) raw ("postclip"));
+
+            chain.drive.setGroovePhaseParams (
+                raw ("trace_enabled") > 0.5f,
+                raw ("trace_gain"),
+                raw ("trace_freq"),
+                raw ("trace_bandwidth"),
+                raw ("pinch_enabled") > 0.5f,
+                raw ("pinch_gain"),
+                raw ("pinch_freq"),
+                raw ("pinch_bandwidth"),
+                (int) raw ("groove_character"),
+                raw ("pinch_stereo") > 0.5f);
             break;
         case EffectId::Pan:
             chain.pan.setMode ((mfx::PanMode) (int) raw ("mode"));
@@ -254,6 +272,12 @@ void MotionFXAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     pullParamsIntoChain (numSamples);
+
+    const int requiredLatency =
+        chain.getLatencySamples();
+
+    if (getLatencySamples() != requiredLatency)
+        setLatencySamples (requiredLatency);
 
     if (buffer.getNumChannels() >= 2)
         chain.processBlock (buffer, currentTransport);

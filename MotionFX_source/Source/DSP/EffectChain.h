@@ -28,7 +28,7 @@ namespace mfx
         void prepare (double sr, int maxBlockSize)
         {
             sampleRate = sr;
-            drive.prepare (sr);
+            drive.prepare (sr, maxBlockSize);
             pan.prepare (sr);
             volume.prepare (sr);
             space.prepare (sr, maxBlockSize);
@@ -40,10 +40,17 @@ namespace mfx
             for (auto& slot : slots)
                 slot.mod.prepare (sr);
 
-            dryBuffer.setSize (2, maxBlockSize);
+            const juce::dsp::ProcessSpec masterMixSpec {
+                sr,
+                (juce::uint32) maxBlockSize,
+                2
+            };
+            masterDryWetMixer.prepare (masterMixSpec);
+            masterDryWetMixer.setMixingRule (
+                juce::dsp::DryWetMixingRule::linear);
+
             inGainSm.reset (sr, 15.0f, 1.0f);
             outGainSm.reset (sr, 15.0f, 1.0f);
-            dryWetSm.reset (sr, 15.0f, 1.0f);
             matchGainSm.reset (sr, 300.0f, 0.0f);
             reset();
         }
@@ -58,6 +65,7 @@ namespace mfx
             width.reset();
             filter.reset();
             stutter.reset();
+            masterDryWetMixer.reset();
 
             for (auto& slot : slots)
                 slot.mod.reset();
@@ -91,9 +99,10 @@ namespace mfx
                 right[sample] *= gain;
             }
 
-            dryBuffer.setSize (2, numSamples, false, false, true);
-            dryBuffer.copyFrom (0, 0, buffer, 0, 0, numSamples);
-            dryBuffer.copyFrom (1, 0, buffer, 1, 0, numSamples);
+            juce::dsp::AudioBlock<float> masterBlock (buffer);
+            masterDryWetMixer.setWetLatency (
+                (float) getLatencySamples());
+            masterDryWetMixer.pushDrySamples (masterBlock);
 
             const float inputRms = 0.5f * (buffer.getRMSLevel (0, 0, numSamples)
                                          + buffer.getRMSLevel (1, 0, numSamples));
@@ -148,15 +157,10 @@ namespace mfx
                 stutter.setEnabled (false);
             }
 
-            dryWetSm.setTarget (dryWet);
-            for (int sample = 0; sample < numSamples; ++sample)
-            {
-                const float amount = dryWetSm.next();
-                left[sample] = dryBuffer.getSample (0, sample) * (1.0f - amount)
-                             + left[sample] * amount;
-                right[sample] = dryBuffer.getSample (1, sample) * (1.0f - amount)
-                              + right[sample] * amount;
-            }
+            masterDryWetMixer.setWetMixProportion (
+                dryWet);
+            masterDryWetMixer.mixWetSamples (
+                masterBlock);
 
             const float outputRms = 0.5f * (buffer.getRMSLevel (0, 0, numSamples)
                                           + buffer.getRMSLevel (1, 0, numSamples));
@@ -189,6 +193,13 @@ namespace mfx
             outputRightLevelUi.store (rawPeakRight, std::memory_order_relaxed);
             outputLevelUi.store (juce::jmax (rawPeakLeft, rawPeakRight),
                                  std::memory_order_relaxed);
+        }
+
+        int getLatencySamples() const noexcept
+        {
+            return slots[(size_t) EffectId::Drive].enabled
+                ? drive.getLatencySamples()
+                : 0;
         }
 
         std::array<EffectId, numEffects> order {
@@ -258,7 +269,8 @@ namespace mfx
         }
 
         double sampleRate = 44100.0;
-        juce::AudioBuffer<float> dryBuffer;
-        Smoothed inGainSm, outGainSm, dryWetSm, matchGainSm;
+        juce::dsp::DryWetMixer<float>
+            masterDryWetMixer { 512 };
+        Smoothed inGainSm, outGainSm, matchGainSm;
     };
 }

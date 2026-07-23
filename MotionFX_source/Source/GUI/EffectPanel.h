@@ -1,5 +1,6 @@
 #pragma once
 #include "Widgets.h"
+#include "DrivePhasePanel.h"
 #include <cmath>
 
 namespace mfx
@@ -125,6 +126,33 @@ namespace mfx
                 primaryKnob->setTooltipText ("Filter cutoff frequency - type a value in Hz");
             }
 
+            if (id == EffectId::Drive)
+            {
+                driveQuality =
+                    std::make_unique<LabeledCombo> (
+                        apvts,
+                        "drive_quality",
+                        "OVERSAMPLING");
+                drivePostClip =
+                    std::make_unique<LabeledCombo> (
+                        apvts,
+                        "drive_postclip",
+                        "POST");
+
+                driveQuality->combo.setTooltip (
+                    "Eco is zero-latency. 2x and 4x use JUCE IIR oversampling and report their latency to the DAW.");
+                drivePostClip->combo.setTooltip (
+                    "True Peak forces 4x oversampling and applies an inter-sample peak guard.");
+
+                drivePhasePanel =
+                    std::make_unique<DrivePhasePanel> (
+                        apvts);
+
+                addAndMakeVisible (*driveQuality);
+                addAndMakeVisible (*drivePostClip);
+                addAndMakeVisible (*drivePhasePanel);
+            }
+
             applyStaticContext();
             startTimerHz (20);
             refreshModContextVisibility();
@@ -209,8 +237,9 @@ namespace mfx
             switch (id)
             {
                 case EffectId::Drive:
+                    primaryKnob->setLabelText ("DRIVE");
                     primaryKnob->setTooltipText (
-                        "Drive amount");
+                        "Global distortion amount");
                     break;
 
                 case EffectId::Pan:
@@ -468,7 +497,21 @@ namespace mfx
             auto top = area.removeFromTop (60);
             enableToggle->setBounds (top.removeFromLeft (68).reduced (0, 7));
             top.removeFromLeft (12);
-            modeCombo->setBounds (top.removeFromLeft (240));
+            modeCombo->setBounds (
+                top.removeFromLeft (
+                    id == EffectId::Drive
+                        ? 205
+                        : 240));
+
+            if (driveQuality != nullptr)
+            {
+                top.removeFromLeft (10);
+                driveQuality->setBounds (
+                    top.removeFromLeft (130));
+                top.removeFromLeft (8);
+                drivePostClip->setBounds (
+                    top.removeFromLeft (145));
+            }
 
             if (filterSlope != nullptr && filterSlope->isVisible())
             {
@@ -488,8 +531,20 @@ namespace mfx
             }
 
             area.removeFromTop (10);
-            visualizer->setBounds (area.removeFromTop (
-                juce::jlimit (175, 210, (int) (area.getHeight() * 0.43f))));
+            const auto visualArea =
+                area.removeFromTop (
+                    juce::jlimit (
+                        175,
+                        210,
+                        (int) (
+                            area.getHeight()
+                            * 0.43f)));
+
+            visualizer->setBounds (visualArea);
+
+            if (drivePhasePanel != nullptr)
+                drivePhasePanel->setBounds (visualArea);
+
             area.removeFromTop (12);
 
             std::vector<LabeledKnob*> knobs;
@@ -559,7 +614,88 @@ namespace mfx
         {
             int key = (int) id * 1000;
 
-            if (id == EffectId::Space)
+            if (id == EffectId::Drive)
+            {
+                const int mode =
+                    modeCombo->combo
+                        .getSelectedItemIndex();
+                const bool grooveMode =
+                    mode == 7;
+
+                key += mode * 100
+                    + getChoice (
+                        "drive_quality") * 10
+                    + getChoice (
+                        "drive_postclip");
+
+                if (! force
+                    && key == lastEffectContextKey)
+                {
+                    return;
+                }
+
+                visualizer->setVisible (
+                    ! grooveMode);
+
+                if (drivePhasePanel != nullptr)
+                {
+                    drivePhasePanel->setVisible (
+                        grooveMode);
+                }
+
+                if (secondaryKnobs.size() >= 4)
+                {
+                    auto& tone =
+                        *secondaryKnobs[0];
+                    auto& bias =
+                        *secondaryKnobs[1];
+                    auto& mixKnob =
+                        *secondaryKnobs[2];
+                    auto& output =
+                        *secondaryKnobs[3];
+
+                    tone.setVisible (
+                        ! grooveMode);
+                    bias.setVisible (
+                        ! grooveMode);
+                    mixKnob.setVisible (true);
+                    output.setVisible (true);
+
+                    primaryKnob->setLabelText (
+                        "DRIVE");
+                    primaryKnob->setTooltipText (
+                        "Global distortion amount");
+
+                    tone.setLabelText (
+                        mode == 4
+                            ? "DAMP"
+                            : mode == 5
+                                ? "FOLD TONE"
+                                : mode == 6
+                                    ? "PERIOD"
+                                    : "TONE");
+
+                    tone.setTooltipText (
+                        mode == 4
+                            ? "Tape high-frequency damping before saturation"
+                            : mode == 5
+                                ? "Spectral balance before wavefolding"
+                                : mode == 6
+                                    ? "Density of the sinusoidal folds"
+                                    : "Pre-emphasis balance before saturation");
+
+                    bias.setLabelText ("BIAS");
+                    bias.setTooltipText (
+                        "Moves the transfer curve away from symmetry to add even harmonics");
+                    mixKnob.setLabelText ("MIX");
+                    mixKnob.setTooltipText (
+                        "Dry and driven signal blend");
+                    output.setLabelText ("OUT");
+                    output.setTooltipText (
+                        "Post-drive output trim");
+                }
+            }
+            else if (id == EffectId::Space)
             {
                 const int mode =
                     modeCombo->combo.getSelectedItemIndex();
@@ -952,6 +1088,9 @@ namespace mfx
         std::unique_ptr<LabeledToggle> spaceDelaySync;
         std::unique_ptr<LabeledCombo> spaceDelayUnit, spaceDelayDivision;
         std::unique_ptr<LabeledCombo> filterSlope;
+        std::unique_ptr<LabeledCombo> driveQuality;
+        std::unique_ptr<LabeledCombo> drivePostClip;
+        std::unique_ptr<DrivePhasePanel> drivePhasePanel;
         int lastEffectContextKey = -1;
         int lastRateUnitKey = -1;
     };

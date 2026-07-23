@@ -346,6 +346,261 @@ int main()
         }
     }
 
+    // Build 9 Drive Lab: every algorithm, quality and post stage
+    // must remain finite, bounded and audibly active.
+    {
+        for (int quality = 0;
+             quality < 3;
+             ++quality)
+        {
+            for (int postClip = 0;
+                 postClip < 4;
+                 ++postClip)
+            {
+                mfx::DriveEffect drive;
+                drive.prepare (48000.0, 257);
+                drive.setParams (
+                    0.25f,
+                    1.0f,
+                    0.0f,
+                    0.35f,
+                    quality,
+                    postClip);
+                drive.setGroovePhaseParams (
+                    true,
+                    8.0f,
+                    684.0f,
+                    0.32f,
+                    true,
+                    8.0f,
+                    7500.0f,
+                    3.0f,
+                    0,
+                    true);
+
+                const int expectedFactor =
+                    postClip == 3
+                        ? 4
+                        : quality == 0
+                            ? 1
+                            : quality == 1
+                                ? 2
+                                : 4;
+
+                if (drive.getQualityFactor()
+                    != expectedFactor)
+                {
+                    std::cout
+                        << "  [FAIL] Drive quality factor mismatch"
+                        << std::endl;
+                    ++failures;
+                }
+
+                if (expectedFactor == 1
+                    && drive.getLatencySamples() != 0)
+                {
+                    std::cout
+                        << "  [FAIL] Eco Drive unexpectedly reports latency"
+                        << std::endl;
+                    ++failures;
+                }
+
+                if (expectedFactor > 1
+                    && drive.getLatencySamples() <= 0)
+                {
+                    std::cout
+                        << "  [FAIL] Oversampled Drive does not report latency"
+                        << std::endl;
+                    ++failures;
+                }
+
+                for (int mode = 0;
+                     mode < 8;
+                     ++mode)
+                {
+                    drive.reset();
+                    drive.setMode (
+                        (mfx::DriveMode) mode);
+
+                    juce::AudioBuffer<float>
+                        driveBuffer (2, 257);
+                    double drivePhase = 0.0;
+                    bool configurationFailed = false;
+
+                    for (int block = 0;
+                         block < 14;
+                         ++block)
+                    {
+                        for (int sample = 0;
+                             sample < driveBuffer
+                                 .getNumSamples();
+                             ++sample)
+                        {
+                            const float value =
+                                0.72f
+                                * (float) std::sin (
+                                    drivePhase);
+
+                            drivePhase +=
+                                juce::MathConstants<double>
+                                    ::twoPi
+                                * 997.0
+                                / 48000.0;
+
+                            if (drivePhase
+                                > juce::MathConstants<double>
+                                    ::twoPi)
+                            {
+                                drivePhase -=
+                                    juce::MathConstants<double>
+                                        ::twoPi;
+                            }
+
+                            driveBuffer.setSample (
+                                0,
+                                sample,
+                                value);
+                            driveBuffer.setSample (
+                                1,
+                                sample,
+                                value * 0.83f);
+                        }
+
+                        drive.processBlock (
+                            driveBuffer,
+                            0.88f);
+
+                        bool finite = true;
+                        float peak = 0.0f;
+                        double energy = 0.0;
+
+                        for (int channel = 0;
+                             channel < 2;
+                             ++channel)
+                        {
+                            const auto* data =
+                                driveBuffer
+                                    .getReadPointer (
+                                        channel);
+
+                            for (int sample = 0;
+                                 sample < driveBuffer
+                                     .getNumSamples();
+                                 ++sample)
+                            {
+                                finite =
+                                    finite
+                                    && std::isfinite (
+                                        data[sample]);
+                                peak = juce::jmax (
+                                    peak,
+                                    std::abs (
+                                        data[sample]));
+                                energy +=
+                                    (double) data[sample]
+                                    * data[sample];
+                            }
+                        }
+
+                        const float allowedPeak =
+                            postClip == 0
+                                ? 4.0f
+                                : 1.35f;
+
+                        if (! finite
+                            || peak > allowedPeak
+                            || energy < 1.0e-8)
+                        {
+                            std::cout
+                                << "  [FAIL] Drive mode "
+                                << mode
+                                << " quality "
+                                << quality
+                                << " post "
+                                << postClip
+                                << " failed integrity checks"
+                                << std::endl;
+                            ++failures;
+                            configurationFailed = true;
+                            break;
+                        }
+                    }
+
+                    if (configurationFailed)
+                        continue;
+                }
+            }
+        }
+
+        // Stereo Pinch should produce a measurably different left/right
+        // result when the source starts identical.
+        mfx::DriveEffect grooveDrive;
+        grooveDrive.prepare (48000.0, 512);
+        grooveDrive.setMode (
+            mfx::DriveMode::GroovePhase);
+        grooveDrive.setParams (
+            0.0f,
+            1.0f,
+            0.0f,
+            0.0f,
+            2,
+            0);
+        grooveDrive.setGroovePhaseParams (
+            false,
+            0.0f,
+            684.0f,
+            0.32f,
+            true,
+            16.0f,
+            7500.0f,
+            3.0f,
+            1,
+            true);
+
+        juce::AudioBuffer<float>
+            stereoBuffer (2, 512);
+
+        for (int sample = 0;
+             sample < stereoBuffer.getNumSamples();
+             ++sample)
+        {
+            const float value =
+                0.55f
+                * std::sin (
+                    juce::MathConstants<float>::twoPi
+                    * 1600.0f
+                    * (float) sample
+                    / 48000.0f);
+            stereoBuffer.setSample (
+                0, sample, value);
+            stereoBuffer.setSample (
+                1, sample, value);
+        }
+
+        grooveDrive.processBlock (
+            stereoBuffer,
+            1.0f);
+
+        double stereoDifference = 0.0;
+
+        for (int sample = 0;
+             sample < stereoBuffer.getNumSamples();
+             ++sample)
+        {
+            stereoDifference += std::abs (
+                stereoBuffer.getSample (0, sample)
+                - stereoBuffer.getSample (1, sample));
+        }
+
+        if (stereoDifference < 0.01)
+        {
+            std::cout
+                << "  [FAIL] Groove Phase stereo Pinch produced no stereo phase difference"
+                << std::endl;
+            ++failures;
+        }
+    }
+
     // Block 7 resonance budget.
     for (int stages = 1; stages <= 4; ++stages)
     {

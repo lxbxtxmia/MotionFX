@@ -76,7 +76,12 @@ namespace
         switch (id)
         {
             case EffectId::Drive:
-                s.secondaryKnobs = { { "drive_tone", "TONE" }, { "drive_mix", "MIX" }, { "drive_outtrim", "OUT" } };
+                s.secondaryKnobs = {
+                    { "drive_tone", "TONE" },
+                    { "drive_bias", "BIAS" },
+                    { "drive_mix", "MIX" },
+                    { "drive_outtrim", "OUT" }
+                };
                 break;
             case EffectId::Pan:
                 s.secondaryKnobs = { { "pan_widthinfluence", "WIDTH INF" } };
@@ -553,7 +558,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.8.1 - Build 8.1
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.9.0 - Build 9
 
 Multi-effect modulation VST3.
 
@@ -573,7 +578,16 @@ Resources
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.8.1 - Build 8.1
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.9.0 - Build 9
+- Rebuilt the Drive engine with eight algorithms and true JUCE oversampling.
+- Added Groove Phase: a crackle-free, band-selective tracing and stereo Pinch distortion model.
+- Added draggable Tracing Model and Pinch X-Y controls with Alt/Option bandwidth editing.
+- Added Wavefold and Sinoid Fold as separate algorithms.
+- Added Drive Bias, Eco/2x/4x oversampling and None/Soft/Hard/True Peak post modes.
+- Added latency reporting and dry/wet compensation.
+- Redrew all header arrows and increased general/accessibility text sizes.
+
+0.8.1 - Build 8.1
 - Refined vector arrows, typography, engineering units and adaptive control geometry.
 - Added 0-200% Width and live modulation-range displays.
 - Simplified the stereo output meter.

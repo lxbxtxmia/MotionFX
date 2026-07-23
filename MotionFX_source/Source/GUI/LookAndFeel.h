@@ -317,9 +317,9 @@ namespace mfx
                     : Palette::textDim);
 
             const float fontSize = juce::jlimit (
-                11.0f,
-                14.5f,
-                bounds.getHeight() * 0.36f);
+                12.5f,
+                16.0f,
+                bounds.getHeight() * 0.39f);
 
             graphics.setFont (FontBank::font (fontSize, true));
             graphics.drawFittedText (
@@ -405,7 +405,7 @@ namespace mfx
                 12.0f,
                 label.getHeight() * 0.56f);
             const float height = juce::jlimit (
-                11.5f,
+                12.5f,
                 maximum,
                 requested);
 
@@ -419,14 +419,14 @@ namespace mfx
         {
             return FontBank::font (
                 juce::jlimit (
-                    13.5f,
-                    17.5f,
-                    box.getHeight() * 0.43f));
+                    14.5f,
+                    18.5f,
+                    box.getHeight() * 0.45f));
         }
 
         juce::Font getPopupMenuFont() override
         {
-            return FontBank::font (15.0f);
+            return FontBank::font (16.0f);
         }
 
         juce::Font getTextButtonFont (
@@ -435,14 +435,14 @@ namespace mfx
         {
             const float maximum =
                 button.getButtonText().length() >= 10
-                    ? 13.0f
-                    : 15.5f;
+                    ? 14.0f
+                    : 16.5f;
 
             return FontBank::font (
                 juce::jlimit (
-                    11.5f,
+                    12.5f,
                     maximum,
-                    buttonHeight * 0.40f),
+                    buttonHeight * 0.42f),
                 false);
         }
 

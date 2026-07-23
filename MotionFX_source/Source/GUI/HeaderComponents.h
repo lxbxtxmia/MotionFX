@@ -52,87 +52,97 @@ namespace mfx
             switch (icon)
             {
                 case HeaderIcon::Previous:
-                    path.startNewSubPath (
+                {
+                    juce::Path arrow;
+                    arrow.addTriangle (
+                        bounds.getX() + 1.0f,
+                        bounds.getCentreY(),
                         bounds.getRight() - 2.0f,
-                        bounds.getY());
-                    path.lineTo (
-                        bounds.getX() + 2.0f,
-                        bounds.getCentreY());
-                    path.lineTo (
+                        bounds.getY() + 1.5f,
                         bounds.getRight() - 2.0f,
-                        bounds.getBottom());
-                    break;
+                        bounds.getBottom() - 1.5f);
+                    graphics.fillPath (arrow);
+                    return;
+                }
 
                 case HeaderIcon::Next:
-                    path.startNewSubPath (
+                {
+                    juce::Path arrow;
+                    arrow.addTriangle (
+                        bounds.getRight() - 1.0f,
+                        bounds.getCentreY(),
                         bounds.getX() + 2.0f,
-                        bounds.getY());
-                    path.lineTo (
-                        bounds.getRight() - 2.0f,
-                        bounds.getCentreY());
-                    path.lineTo (
+                        bounds.getY() + 1.5f,
                         bounds.getX() + 2.0f,
-                        bounds.getBottom());
-                    break;
+                        bounds.getBottom() - 1.5f);
+                    graphics.fillPath (arrow);
+                    return;
+                }
 
                 case HeaderIcon::Undo:
                 case HeaderIcon::Redo:
                 {
-                    const bool redo = icon == HeaderIcon::Redo;
-                    const float headX = redo
-                        ? bounds.getRight() - 2.0f
-                        : bounds.getX() + 2.0f;
-                    const float headY = bounds.getCentreY() - 1.0f;
-                    const float direction = redo ? 1.0f : -1.0f;
-
-                    juce::Path curve;
-                    const float curveStartX =
-                        headX - direction * 4.5f;
-                    const float tailX = redo
+                    const bool redo =
+                        icon == HeaderIcon::Redo;
+                    const float centreY =
+                        bounds.getCentreY();
+                    const float tipX = redo
+                        ? bounds.getRight() - 1.0f
+                        : bounds.getX() + 1.0f;
+                    const float baseX = redo
+                        ? tipX - 7.0f
+                        : tipX + 7.0f;
+                    const float outerX = redo
                         ? bounds.getX() + 2.0f
                         : bounds.getRight() - 2.0f;
 
-                    curve.startNewSubPath (
-                        curveStartX,
-                        headY);
-                    curve.cubicTo (
-                        curveStartX - direction * bounds.getWidth() * 0.16f,
-                        bounds.getY() + 1.5f,
-                        tailX,
-                        bounds.getY() + 2.0f,
-                        tailX,
-                        bounds.getBottom() - 2.0f);
-
-                    graphics.strokePath (
-                        curve,
-                        juce::PathStrokeType (
-                            2.2f,
-                            juce::PathStrokeType::curved,
-                            juce::PathStrokeType::rounded));
-
                     juce::Path arrowHead;
+
                     if (redo)
                     {
                         arrowHead.addTriangle (
-                            headX,
-                            headY,
-                            headX - 7.0f,
-                            headY - 5.2f,
-                            headX - 7.0f,
-                            headY + 5.2f);
+                            tipX,
+                            centreY,
+                            baseX,
+                            centreY - 5.0f,
+                            baseX,
+                            centreY + 5.0f);
                     }
                     else
                     {
                         arrowHead.addTriangle (
-                            headX,
-                            headY,
-                            headX + 7.0f,
-                            headY - 5.2f,
-                            headX + 7.0f,
-                            headY + 5.2f);
+                            tipX,
+                            centreY,
+                            baseX,
+                            centreY - 5.0f,
+                            baseX,
+                            centreY + 5.0f);
                     }
 
                     graphics.fillPath (arrowHead);
+
+                    juce::Path shaft;
+                    const float shaftStart = redo
+                        ? baseX - 1.0f
+                        : baseX + 1.0f;
+
+                    shaft.startNewSubPath (
+                        shaftStart,
+                        centreY);
+                    shaft.cubicTo (
+                        outerX,
+                        centreY,
+                        outerX,
+                        bounds.getY() + 2.0f,
+                        outerX,
+                        bounds.getBottom() - 2.0f);
+
+                    graphics.strokePath (
+                        shaft,
+                        juce::PathStrokeType (
+                            2.2f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
                     return;
                 }
 
