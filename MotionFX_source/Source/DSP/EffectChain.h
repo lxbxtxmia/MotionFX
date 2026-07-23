@@ -32,7 +32,7 @@ namespace mfx
             pan.prepare (sr);
             volume.prepare (sr);
             space.prepare (sr, maxBlockSize);
-            retro.prepare (sr);
+            retro.prepare (sr, maxBlockSize);
             width.prepare (sr);
             filter.prepare (sr, maxBlockSize);
             stutter.prepare (sr);
@@ -197,9 +197,12 @@ namespace mfx
 
         int getLatencySamples() const noexcept
         {
-            return slots[(size_t) EffectId::Drive].enabled
-                ? drive.getLatencySamples()
-                : 0;
+            int latency = 0;
+            if (slots[(size_t) EffectId::Drive].enabled)
+                latency += drive.getLatencySamples();
+            if (slots[(size_t) EffectId::Retro].enabled)
+                latency += retro.getLatencySamples();
+            return latency;
         }
 
         std::array<EffectId, numEffects> order {
@@ -270,7 +273,7 @@ namespace mfx
 
         double sampleRate = 44100.0;
         juce::dsp::DryWetMixer<float>
-            masterDryWetMixer { 512 };
+            masterDryWetMixer { 4096 };
         Smoothed inGainSm, outGainSm, matchGainSm;
     };
 }

@@ -1,5 +1,18 @@
 # MotionFX changelog
 
+## 0.10.0 - Build 10: Retro Lab
+
+- Rebuilt Retro as six distinct processors: Bitcrush, Lossy, Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
+- Added explicit bit depth, sample-rate reduction, Step/Linear/Smooth hold, TPDF-style dither and optional anti-alias filtering.
+- Added an FFT Lossy processor with 256/512/1024-point quality modes, bandwidth, spectral detail, deterministic damage and stereo linking.
+- Added independent wow, flutter, progressive dropout, age and stereo-drift controls.
+- Added an original real-time SP 12-bit model using the documented 26.04 kHz base clock, 12-bit quantisation and selectable unfiltered/static/dynamic output filtering.
+- Added Reel-to-Reel and Cassette profiles, five tape speeds, distinct noise spectra, head bump, loss, motion and saturation behaviour.
+- Added original B-style/C-style companding-inspired tape noise reduction and an adaptive high-band denoise control.
+- Added Vinyl Dust for surface noise, crackle, dust and high-frequency wear without duplicating Groove Phase.
+- Added dedicated Retro visualisations, context-sensitive controls, latency reporting and DSP integrity tests.
+- No third-party GPL DSP source was copied; public projects and papers were used as technical references only.
+
 ## 0.9.1 - Build 9.1: Groove Phase reference pass
 
 - Analysed the supplied Ableton Vinyl Distortion and MotionFX IR sweeps at matching settings.

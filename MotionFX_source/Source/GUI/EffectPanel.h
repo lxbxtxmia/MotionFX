@@ -1,6 +1,7 @@
 #pragma once
 #include "Widgets.h"
 #include "DrivePhasePanel.h"
+#include "RetroLabPanel.h"
 #include <cmath>
 
 namespace mfx
@@ -154,6 +155,15 @@ namespace mfx
                 addAndMakeVisible (*drivePhasePanel);
             }
 
+
+            if (id == EffectId::Retro)
+            {
+                retroLabPanel = std::make_unique<RetroLabPanel> (
+                    apvts,
+                    chain.retro);
+                addAndMakeVisible (*retroLabPanel);
+            }
+
             applyStaticContext();
             startTimerHz (20);
             refreshModContextVisibility();
@@ -278,8 +288,9 @@ namespace mfx
                     break;
 
                 case EffectId::Retro:
+                    primaryKnob->setLabelText ("AMOUNT");
                     primaryKnob->setTooltipText (
-                        "Retro effect amount");
+                        "Intensity of the selected Retro process");
                     break;
 
                 case EffectId::Width:
@@ -546,6 +557,9 @@ namespace mfx
             if (drivePhasePanel != nullptr)
                 drivePhasePanel->setBounds (visualArea);
 
+            if (retroLabPanel != nullptr)
+                retroLabPanel->setBounds (visualArea);
+
             area.removeFromTop (12);
 
             std::vector<LabeledKnob*> knobs;
@@ -555,16 +569,21 @@ namespace mfx
                 if (knob->isVisible())
                     knobs.push_back (knob.get());
 
-            constexpr int knobWidth = 126;
-            constexpr int knobHeight = 144;
-            constexpr int gap = 16;
             const int count = (int) knobs.size();
+            const int gap = count >= 7 ? 8 : count >= 5 ? 12 : 16;
+            const int maximumKnobWidth = count >= 7 ? 104 : count >= 5 ? 116 : 126;
+            const int knobWidth = juce::jmin (
+                maximumKnobWidth,
+                juce::jmax (82, (area.getWidth() - gap * juce::jmax (0, count - 1))
+                    / juce::jmax (1, count)));
+            const int knobHeight = count >= 7 ? 132 : 144;
             const int totalWidth = count * knobWidth + juce::jmax (0, count - 1) * gap;
             int x = area.getX() + juce::jmax (0, (area.getWidth() - totalWidth) / 2);
             const int y = area.getY() + juce::jmax (0, (area.getHeight() - knobHeight) / 3);
 
             for (auto* knob : knobs)
             {
+                knob->setCompactLayout (count >= 7);
                 knob->setBounds (x, y, knobWidth, knobHeight);
                 x += knobWidth + gap;
             }
@@ -856,7 +875,9 @@ namespace mfx
                 const int mode =
                     modeCombo->combo.getSelectedItemIndex();
                 key += mode * 100000
-                    + (int) chain.retro.getSampleRate();
+                    + getChoice ("retro_lossy_quality") * 100
+                    + getChoice ("retro_tape_machine") * 10
+                    + getChoice ("retro_tape_nr");
 
                 if (! force
                     && key == lastEffectContextKey)
@@ -864,144 +885,148 @@ namespace mfx
                     return;
                 }
 
-                if (! secondaryKnobs.empty())
+                visualizer->setVisible (false);
+                if (retroLabPanel != nullptr)
+                    retroLabPanel->setVisible (true);
+
+                for (auto& knob : secondaryKnobs)
                 {
-                    auto& rate = *secondaryKnobs[0];
+                    knob->setVisible (false);
+                    knob->setCompactLayout (false);
+                    knob->restoreDefaultFormatter();
+                }
 
-                    switch (mode)
+                const auto show = [this] (size_t index,
+                                          const juce::String& label,
+                                          const juce::String& tooltip)
+                {
+                    if (index >= secondaryKnobs.size())
+                        return (LabeledKnob*) nullptr;
+
+                    auto* knob = secondaryKnobs[index].get();
+                    knob->setVisible (true);
+                    knob->setLabelText (label);
+                    knob->setTooltipText (tooltip);
+                    return knob;
+                };
+
+                constexpr size_t bits = 0;
+                constexpr size_t sampleRate = 1;
+                constexpr size_t lossyBandwidth = 2;
+                constexpr size_t lossyDetail = 3;
+                constexpr size_t lossyDamage = 4;
+                constexpr size_t wow = 5;
+                constexpr size_t flutter = 6;
+                constexpr size_t dropout = 7;
+                constexpr size_t age = 8;
+                constexpr size_t stereoDrift = 9;
+                constexpr size_t spClock = 10;
+                constexpr size_t spFilterCutoff = 11;
+                constexpr size_t spDrive = 12;
+                constexpr size_t tapeDrive = 13;
+                constexpr size_t tapeAge = 14;
+                constexpr size_t tapeMotion = 15;
+                constexpr size_t tapeNoise = 16;
+                constexpr size_t tapeNrAmount = 17;
+                constexpr size_t tapeDenoise = 18;
+                constexpr size_t vinylDust = 19;
+                constexpr size_t vinylCrackle = 20;
+                constexpr size_t vinylSurface = 21;
+                constexpr size_t vinylWear = 22;
+                constexpr size_t mixIndex = 23;
+
+                auto* mixKnob = show (
+                    mixIndex,
+                    "MIX",
+                    "Dry and processed Retro signal blend");
+                juce::ignoreUnused (mixKnob);
+
+                if (mode == 0)
+                {
+                    show (bits, "BITS", "Quantisation depth from 2 to 16 bits");
+                    if (auto* knob = show (
+                            sampleRate,
+                            "SAMPLE RATE",
+                            "Sample-and-hold frequency"))
                     {
-                        case 0:
-                            rate.setLabelText (
-                                "SAMPLE RATE");
-                            rate.setTooltipText (
-                                "Effective sample-and-hold rate used by Bitcrush");
-                            rate.setDisplayFunctions (
-                                [this] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        chain.retro.bitcrushSampleRateHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        false);
-                                },
-                                [this] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        chain.retro.bitcrushSampleRateHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        true);
-                                },
-                                [this] (const juce::String& text)
-                                {
-                                    return 100.0
-                                        * chain.retro
-                                            .bitcrushNormalisedFromSampleRateHz (
-                                                (float)
-                                                ValueFormatting::parseEngineeringValue (
-                                                    text));
-                                });
-                            break;
-
-                        case 1:
-                            rate.setLabelText (
-                                "BANDWIDTH");
-                            rate.setTooltipText (
-                                "Lossy-codec bandwidth");
-                            rate.setDisplayFunctions (
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::lossyBandwidthHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        false);
-                                },
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::lossyBandwidthHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        true);
-                                },
-                                [] (const juce::String& text)
-                                {
-                                    return 100.0
-                                        * RetroEffect
-                                            ::lossyNormalisedFromBandwidthHz (
-                                                (float)
-                                                ValueFormatting::parseEngineeringValue (
-                                                    text));
-                                });
-                            break;
-
-                        case 2:
-                            rate.setLabelText (
-                                "WOW RATE");
-                            rate.setTooltipText (
-                                "Wow and flutter movement rate");
-                            rate.setDisplayFunctions (
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::wearRateHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        false);
-                                },
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::wearRateHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        true);
-                                },
-                                [] (const juce::String& text)
-                                {
-                                    return 100.0
-                                        * RetroEffect
-                                            ::wearNormalisedFromRateHz (
-                                                (float)
-                                                ValueFormatting::parseEngineeringValue (
-                                                    text));
-                                });
-                            break;
-
-                        default:
-                            rate.setLabelText (
-                                "FILTER");
-                            rate.setTooltipText (
-                                "E-mu-style output filter cutoff");
-                            rate.setDisplayFunctions (
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::emuFilterHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        false);
-                                },
-                                [] (double percent)
-                                {
-                                    return ValueFormatting::frequencyHz (
-                                        RetroEffect::emuFilterHz (
-                                            (float) percent
-                                            / 100.0f),
-                                        true);
-                                },
-                                [] (const juce::String& text)
-                                {
-                                    return 100.0
-                                        * RetroEffect
-                                            ::emuNormalisedFromFilterHz (
-                                                (float)
-                                                ValueFormatting::parseEngineeringValue (
-                                                    text));
-                                });
-                            break;
+                        knob->setDisplayFunctions (
+                            [] (double value) { return ValueFormatting::frequencyHz (value, false); },
+                            [] (double value) { return ValueFormatting::frequencyHz (value, true); },
+                            [] (const juce::String& text) { return ValueFormatting::parseEngineeringValue (text); });
                     }
+                }
+                else if (mode == 1)
+                {
+                    if (auto* knob = show (
+                            lossyBandwidth,
+                            "BANDWIDTH",
+                            "Upper spectral bandwidth retained by the Lossy processor"))
+                    {
+                        knob->setDisplayFunctions (
+                            [] (double value) { return ValueFormatting::frequencyHz (value, false); },
+                            [] (double value) { return ValueFormatting::frequencyHz (value, true); },
+                            [] (const juce::String& text) { return ValueFormatting::parseEngineeringValue (text); });
+                    }
+                    show (lossyDetail, "DETAIL", "Magnitude and phase resolution retained per FFT frame");
+                    show (lossyDamage, "DAMAGE", "Probability and depth of deterministic spectral omissions");
+                }
+                else if (mode == 2)
+                {
+                    show (wow, "WOW", "Slow cyclic pitch instability");
+                    show (flutter, "FLUTTER", "Faster mechanical pitch instability");
+                    show (dropout, "DROPOUT", "Frequency and depth of progressive signal dropouts");
+                    show (age, "AGE", "High-frequency loss and background wear");
+                    show (stereoDrift, "STEREO DRIFT", "Small independent timing drift between channels");
+                }
+                else if (mode == 3)
+                {
+                    if (auto* knob = show (
+                            spClock,
+                            "CLOCK",
+                            "SP-style sample clock shift in semitones"))
+                    {
+                        knob->setDisplayFunctions (
+                            [] (double value)
+                            {
+                                const int semitones = (int) std::lround (value);
+                                return juce::String (semitones > 0 ? "+" : "")
+                                    + juce::String (semitones) + " st";
+                            },
+                            [] (double value)
+                            {
+                                const int semitones = (int) std::lround (value);
+                                return juce::String (semitones > 0 ? "+" : "")
+                                    + juce::String (semitones) + " semitones";
+                            },
+                            [] (const juce::String& text) { return text.getDoubleValue(); });
+                    }
+                    if (auto* knob = show (
+                            spFilterCutoff,
+                            "FILTER",
+                            "Output reconstruction filter cutoff"))
+                    {
+                        knob->setDisplayFunctions (
+                            [] (double value) { return ValueFormatting::frequencyHz (value, false); },
+                            [] (double value) { return ValueFormatting::frequencyHz (value, true); },
+                            [] (const juce::String& text) { return ValueFormatting::parseEngineeringValue (text); });
+                    }
+                    show (spDrive, "INPUT DRIVE", "Input saturation before 12-bit conversion");
+                }
+                else if (mode == 4)
+                {
+                    show (tapeDrive, "DRIVE", "Magnetic saturation amount");
+                    show (tapeAge, "AGE", "Head loss, memory and high-frequency wear");
+                    show (tapeMotion, "MOTION", "Wow, flutter and channel instability");
+                    show (tapeNoise, "NOISE", "Machine-specific tape hiss and low-frequency noise");
+                    show (tapeNrAmount, "NR AMOUNT", "Strength of the B-style or C-style companding path");
+                    show (tapeDenoise, "DENOISE", "Adaptive high-band gate for generated tape noise");
+                }
+                else
+                {
+                    show (vinylDust, "DUST", "Sparse light surface impulses");
+                    show (vinylCrackle, "CRACKLE", "Larger transient surface defects");
+                    show (vinylSurface, "SURFACE", "Continuous high-passed surface noise");
+                    show (vinylWear, "WEAR", "Progressive high-frequency loss");
                 }
             }
             else if (! force
@@ -1092,6 +1117,7 @@ namespace mfx
         std::unique_ptr<LabeledCombo> driveQuality;
         std::unique_ptr<LabeledCombo> drivePostClip;
         std::unique_ptr<DrivePhasePanel> drivePhasePanel;
+        std::unique_ptr<RetroLabPanel> retroLabPanel;
         int lastEffectContextKey = -1;
         int lastRateUnitKey = -1;
     };

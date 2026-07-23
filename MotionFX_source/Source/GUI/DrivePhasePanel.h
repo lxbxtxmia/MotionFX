@@ -38,7 +38,9 @@ namespace mfx
             setColour (juce::Label::outlineWhenEditingColourId,
                        Palette::teal);
             setFont (FontBank::numericFont (11.0f, true));
-            setTooltip ("Click to type a value. Double-click resets this field to its default.");
+            setTooltip (
+                "Click to type, or drag vertically to change the value. "
+                "Hold Shift for fine adjustment. Double-click resets to default.");
 
             onTextChange = [this]
             {
@@ -71,6 +73,81 @@ namespace mfx
                          value->load (std::memory_order_relaxed)),
                      juce::dontSendNotification);
             updatingText = false;
+        }
+
+        void mouseDown (const juce::MouseEvent& event) override
+        {
+            dragStartY = event.position.y;
+            dragStartNormalised = parameter != nullptr
+                ? parameter->getValue()
+                : 0.0f;
+            dragChanged = false;
+            dragGestureActive = false;
+
+            // Label opens its editor on mouse-up when no drag occurred.
+            juce::Label::mouseDown (event);
+        }
+
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            if (parameter == nullptr)
+                return;
+
+            const float deltaY = dragStartY - event.position.y;
+
+            if (! dragChanged && std::abs (deltaY) < 2.0f)
+                return;
+
+            if (! dragGestureActive)
+            {
+                dragChanged = true;
+                dragGestureActive = true;
+                parameter->beginChangeGesture();
+                setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+            }
+
+            float pixelsForFullRange = 180.0f;
+
+            switch (unit)
+            {
+                case Unit::Decibels:
+                    pixelsForFullRange = 190.0f;
+                    break;
+                case Unit::Frequency:
+                    pixelsForFullRange = 250.0f;
+                    break;
+                case Unit::Bandwidth:
+                    pixelsForFullRange = 170.0f;
+                    break;
+            }
+
+            if (event.mods.isShiftDown())
+                pixelsForFullRange *= 5.0f;
+
+            const float normalised = juce::jlimit (
+                0.0f,
+                1.0f,
+                dragStartNormalised + deltaY / pixelsForFullRange);
+
+            parameter->setValueNotifyingHost (normalised);
+            refresh();
+        }
+
+        void mouseUp (const juce::MouseEvent& event) override
+        {
+            if (dragGestureActive && parameter != nullptr)
+                parameter->endChangeGesture();
+
+            if (dragChanged)
+            {
+                dragGestureActive = false;
+                dragChanged = false;
+                setMouseCursor (juce::MouseCursor::NormalCursor);
+                refresh();
+                return;
+            }
+
+            juce::Label::mouseUp (event);
         }
 
         void mouseDoubleClick (
@@ -139,6 +216,10 @@ namespace mfx
         std::atomic<float>* value = nullptr;
         Unit unit = Unit::Bandwidth;
         bool updatingText = false;
+        float dragStartY = 0.0f;
+        float dragStartNormalised = 0.0f;
+        bool dragChanged = false;
+        bool dragGestureActive = false;
     };
 
     class DriveBandPad final : public juce::Component,

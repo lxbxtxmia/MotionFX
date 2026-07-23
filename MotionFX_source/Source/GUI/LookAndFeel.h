@@ -65,16 +65,16 @@ namespace mfx
         juce::Typeface::Ptr getTypefaceForFont (
             const juce::Font& font) override
         {
-            if (font.getTypefaceName().containsIgnoreCase (
-                    "Atkinson"))
-            {
-                auto typeface = font.isBold()
-                    ? FontBank::boldTypeface()
-                    : FontBank::regularTypeface();
+            // Route every JUCE-created UI font through the embedded
+            // Atkinson Hyperlegible Next family. Some stock JUCE controls
+            // request the platform sans-serif name, so checking the incoming
+            // font name allowed the system font to leak into the interface.
+            auto typeface = font.isBold()
+                ? FontBank::boldTypeface()
+                : FontBank::regularTypeface();
 
-                if (typeface != nullptr)
-                    return typeface;
-            }
+            if (typeface != nullptr)
+                return typeface;
 
             return juce::LookAndFeel_V4::getTypefaceForFont (font);
         }

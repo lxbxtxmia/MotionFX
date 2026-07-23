@@ -185,7 +185,32 @@ namespace
                 s.secondaryKnobs = { { "space_size", "SIZE" }, { "space_decay", "DECAY" }, { "space_tone", "TONE" } };
                 break;
             case EffectId::Retro:
-                s.secondaryKnobs = { { "retro_rate", "RATE" }, { "retro_tone", "TONE" }, { "retro_mix", "MIX" } };
+                s.secondaryKnobs = {
+                    { "retro_bits", "BITS" },
+                    { "retro_sample_rate", "SAMPLE RATE" },
+                    { "retro_lossy_bandwidth", "BANDWIDTH" },
+                    { "retro_lossy_detail", "DETAIL" },
+                    { "retro_lossy_damage", "DAMAGE" },
+                    { "retro_wow", "WOW" },
+                    { "retro_flutter", "FLUTTER" },
+                    { "retro_dropout", "DROPOUT" },
+                    { "retro_age", "AGE" },
+                    { "retro_stereo_drift", "STEREO DRIFT" },
+                    { "retro_sp_clock", "CLOCK" },
+                    { "retro_sp_filter_cutoff", "FILTER" },
+                    { "retro_sp_drive", "INPUT DRIVE" },
+                    { "retro_tape_drive", "DRIVE" },
+                    { "retro_tape_age", "AGE" },
+                    { "retro_tape_motion", "MOTION" },
+                    { "retro_tape_noise", "NOISE" },
+                    { "retro_tape_nr_amount", "NR AMOUNT" },
+                    { "retro_tape_denoise", "DENOISE" },
+                    { "retro_vinyl_dust", "DUST" },
+                    { "retro_vinyl_crackle", "CRACKLE" },
+                    { "retro_vinyl_surface", "SURFACE" },
+                    { "retro_vinyl_wear", "WEAR" },
+                    { "retro_mix", "MIX" }
+                };
                 break;
             case EffectId::Width:
                 s.secondaryKnobs = { { "width_crossover", "X-OVER" } };
@@ -651,7 +676,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.9.1 - Build 9.1
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.10.0 - Build 10
 
 Multi-effect modulation VST3.
 
@@ -669,9 +694,26 @@ Resources
 - Steinberg VST3 SDK through JUCE
 - GitHub Actions continuous integration
 
+Retro Lab research basis
+- Public SP-12/SP-1200 circuit and clock documentation
+- Public physical-model research on analog tape machines
+- Public spectral-gating descriptions for adaptive noise reduction
+- MotionFX uses original DSP code; no third-party GPL source was copied
+
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.9.1 - Build 9.1
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.10.0 - Build 10: Retro Lab
+- Rebuilt Retro as six distinct processors: Bitcrush, Lossy, Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
+- Added explicit bit depth, sample-rate hold modes, dither and optional anti-alias filtering.
+- Added a real FFT Lossy processor with Eco/Normal/High quality, bandwidth, detail, damage and stereo-link controls.
+- Added separate wow, flutter, progressive dropout, age and stereo-drift controls.
+- Added an original SP 12-bit real-time model based on the documented 26.04 kHz clock, 12-bit conversion and selectable output-filter families.
+- Added Reel-to-Reel and Cassette tape profiles, five tape speeds, machine-specific noise and B-style/C-style companding-inspired noise reduction.
+- Added an adaptive high-band tape denoise control based on public spectral-gating concepts.
+- Added a dedicated Vinyl Dust processor for surface noise and wear without duplicating Groove Phase distortion.
+- Added mode-specific controls, visual feedback, latency reporting and extensive audio integrity tests.
+
+0.9.1 - Build 9.1
 - Retuned Groove Phase from the supplied reference IR, restoring its bounded stereo DC punch and cross-channel Pinch geometry.
 - Added clickable Gain, Frequency and Bandwidth fields plus a live spectrum behind both Groove Phase curves.
 - Corrected Soft post clipping so it remains transparent below its knee and audited zero-Drive transparency across every algorithm.

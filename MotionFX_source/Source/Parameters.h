@@ -36,7 +36,13 @@ namespace mfx
     inline juce::StringArray panModeChoices() { return { "Linear", "Ping-Pong", "Rotary" }; }
     inline juce::StringArray volumeModeChoices() { return { "Linear", "Exponential", "Gate", "Duck" }; }
     inline juce::StringArray spaceModeChoices() { return { "Plate", "Hall", "Echo Delay", "Pan Delay", "Gated Reverb", "Tape Delay", "Shimmer" }; }
-    inline juce::StringArray retroModeChoices() { return { "Bitcrush", "Lossy", "Wear & Tear", "E-mu 12-Bit" }; }
+    inline juce::StringArray retroModeChoices() { return { "Bitcrush", "Lossy", "Wear & Tear", "SP 12-Bit", "Tape", "Vinyl Dust" }; }
+    inline juce::StringArray retroBitHoldChoices() { return { "Step", "Linear", "Smooth" }; }
+    inline juce::StringArray retroLossyQualityChoices() { return { "Eco", "Normal", "High" }; }
+    inline juce::StringArray retroSpFilterChoices() { return { "Unfiltered", "Static", "Dynamic" }; }
+    inline juce::StringArray retroTapeMachineChoices() { return { "Reel-to-Reel", "Cassette" }; }
+    inline juce::StringArray retroTapeSpeedChoices() { return { "1 7/8 IPS", "3 3/4 IPS", "7 1/2 IPS", "15 IPS", "30 IPS" }; }
+    inline juce::StringArray retroTapeNrChoices() { return { "Off", "B-style", "C-style" }; }
     inline juce::StringArray widthModeChoices() { return { "Stereo Width", "Haas", "Mono Bass", "Phase" }; }
     inline juce::StringArray filterModeChoices() { return { "Low Pass", "High Pass", "Band Pass", "Notch", "Peak", "Comb" }; }
     inline juce::StringArray filterSlopeChoices() { return { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" }; }
@@ -200,10 +206,110 @@ namespace mfx
             }
             else if (prefix == "retro")
             {
-                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID ("retro_mode", 1), "Retro Mode", retroModeChoices(), 0));
-                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("retro_rate", 1), "Retro Rate", juce::NormalisableRange<float> (0.0f, 100.0f), 30.0f));
-                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("retro_tone", 1), "Retro Tone", juce::NormalisableRange<float> (-100.0f, 100.0f), 0.0f));
-                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID ("retro_mix", 1), "Retro Mix", juce::NormalisableRange<float> (0.0f, 100.0f), 100.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_mode", 1), "Retro Mode", retroModeChoices(), 0));
+
+                // Legacy parameters are retained for old preset compatibility.
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_rate", 1), "Legacy Retro Rate",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 30.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tone", 1), "Legacy Retro Tone",
+                    juce::NormalisableRange<float> (-100.0f, 100.0f), 0.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_mix", 1), "Retro Mix",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 100.0f));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterInt> (
+                    juce::ParameterID ("retro_bits", 1), "Bit Depth", 2, 16, 12));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_sample_rate", 1), "Bit Sample Rate",
+                    juce::NormalisableRange<float> (500.0f, 48000.0f, 0.0f, 0.35f), 12000.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_bit_hold", 1), "Bit Hold Mode", retroBitHoldChoices(), 0));
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                    juce::ParameterID ("retro_bit_dither", 1), "Bit Dither", false));
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                    juce::ParameterID ("retro_bit_antialias", 1), "Bit Anti-Alias", false));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_lossy_bandwidth", 1), "Lossy Bandwidth",
+                    juce::NormalisableRange<float> (500.0f, 24000.0f, 0.0f, 0.35f), 12000.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_lossy_detail", 1), "Lossy Detail",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 65.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_lossy_damage", 1), "Lossy Damage",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 35.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_lossy_quality", 1), "Lossy Quality", retroLossyQualityChoices(), 1));
+                parameters.push_back (std::make_unique<juce::AudioParameterBool> (
+                    juce::ParameterID ("retro_lossy_stereo_link", 1), "Lossy Stereo Link", true));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_wow", 1), "Wear Wow",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 30.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_flutter", 1), "Wear Flutter",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 20.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_dropout", 1), "Wear Dropout",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 10.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_age", 1), "Wear Age",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 35.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_stereo_drift", 1), "Wear Stereo Drift",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 20.0f));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterInt> (
+                    juce::ParameterID ("retro_sp_clock", 1), "SP Clock", -12, 12, 0));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_sp_filter", 1), "SP Output Filter", retroSpFilterChoices(), 1));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_sp_filter_cutoff", 1), "SP Filter Cutoff",
+                    juce::NormalisableRange<float> (1200.0f, 14000.0f, 0.0f, 0.35f), 8500.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_sp_drive", 1), "SP Input Drive",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 30.0f));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_tape_machine", 1), "Tape Machine", retroTapeMachineChoices(), 0));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_tape_speed", 1), "Tape Speed", retroTapeSpeedChoices(), 3));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_drive", 1), "Tape Drive",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 35.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_age", 1), "Tape Age",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 25.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_motion", 1), "Tape Motion",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 18.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_noise", 1), "Tape Noise",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 12.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
+                    juce::ParameterID ("retro_tape_nr", 1), "Tape Noise Reduction", retroTapeNrChoices(), 0));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_nr_amount", 1), "Tape Noise Reduction Amount",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 70.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_tape_denoise", 1), "Tape Adaptive Denoise",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 0.0f));
+
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_vinyl_dust", 1), "Vinyl Dust",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 15.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_vinyl_crackle", 1), "Vinyl Crackle",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 12.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_vinyl_surface", 1), "Vinyl Surface Noise",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 18.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_vinyl_wear", 1), "Vinyl Wear",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 25.0f));
             }
             else if (prefix == "width")
             {

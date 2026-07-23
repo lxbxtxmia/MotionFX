@@ -179,15 +179,156 @@ int main()
         ++failures;
     }
 
-    if (std::abs (mfx::RetroEffect::lossyBandwidthHz (1.0f) - 18000.0f) > 0.01f
-        || std::abs (mfx::RetroEffect::wearRateHz (1.0f) - 4.6f) > 0.001f
-        || std::abs (mfx::RetroEffect::emuFilterHz (0.0f) - 3000.0f) > 0.01f)
+    // Build 10 Retro Lab parameter, latency and DSP checks.
+    for (auto* parameterId : {
+             "retro_bits", "retro_sample_rate", "retro_bit_hold",
+             "retro_lossy_bandwidth", "retro_lossy_detail", "retro_lossy_damage",
+             "retro_wow", "retro_flutter", "retro_dropout", "retro_age",
+             "retro_sp_clock", "retro_sp_filter", "retro_sp_filter_cutoff",
+             "retro_tape_machine", "retro_tape_speed", "retro_tape_nr",
+             "retro_tape_denoise", "retro_vinyl_dust", "retro_vinyl_crackle"
+         })
     {
-        std::cout << "  [FAIL] Retro contextual units do not match DSP mappings"
+        if (proc.apvts.getParameter (parameterId) == nullptr)
+        {
+            std::cout << "  [FAIL] missing Retro Lab parameter "
+                      << parameterId << std::endl;
+            ++failures;
+        }
+    }
+
+    if (std::abs (mfx::RetroEffect::spBaseSampleRate - 26040.0f) > 0.01f
+        || std::abs (mfx::RetroEffect::tapeSpeedIps (mfx::TapeSpeed::Ips15) - 15.0f) > 0.001f
+        || std::abs (mfx::RetroEffect::tapeSpeedIps (mfx::TapeSpeed::Ips1_875) - 1.875f) > 0.001f)
+    {
+        std::cout << "  [FAIL] documented SP clock or tape speed constants are incorrect"
                   << std::endl;
         ++failures;
     }
 
+    {
+        mfx::RetroEffect retroTest;
+        retroTest.prepare (48000.0, 257);
+        retroTest.setMix (1.0f);
+        retroTest.setBitcrushParams (7, 9000.0f, 0, true, true);
+        retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 1, true);
+        retroTest.setWearParams (0.45f, 0.35f, 0.25f, 0.45f, 0.30f);
+        retroTest.setSpParams (0, 2, 8000.0f, 0.35f);
+        retroTest.setTapeParams (0, 3, 0.45f, 0.30f, 0.25f, 0.18f, 1, 0.70f, 0.25f);
+        retroTest.setVinylParams (0.20f, 0.18f, 0.22f, 0.30f);
+
+        if (std::abs (retroTest.spEffectiveSampleRate() - 26040.0f) > 0.1f)
+        {
+            std::cout << "  [FAIL] SP 12-bit base clock is not 26.04 kHz"
+                      << std::endl;
+            ++failures;
+        }
+
+        for (int quality = 0; quality < 3; ++quality)
+        {
+            retroTest.setMode (mfx::RetroMode::Lossy);
+            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, quality, true);
+            const int expectedLatency = quality == 0 ? 256 : quality == 1 ? 512 : 1024;
+            if (retroTest.getLatencySamples() != expectedLatency)
+            {
+                std::cout << "  [FAIL] Lossy quality latency mismatch for quality "
+                          << quality << std::endl;
+                ++failures;
+            }
+        }
+
+        for (int mode = 0; mode < 6; ++mode)
+        {
+            retroTest.reset();
+            retroTest.setMode ((mfx::RetroMode) mode);
+            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 1, true);
+
+            juce::AudioBuffer<float> retroBuffer (2, 257);
+            double phase = 0.0;
+            bool modeFailed = false;
+
+            for (int block = 0; block < 28; ++block)
+            {
+                for (int sample = 0; sample < retroBuffer.getNumSamples(); ++sample)
+                {
+                    const float value = 0.48f * (float) std::sin (phase)
+                        + 0.13f * (float) std::sin (phase * 2.37);
+                    phase += juce::MathConstants<double>::twoPi * 731.0 / 48000.0;
+                    if (phase > juce::MathConstants<double>::twoPi)
+                        phase -= juce::MathConstants<double>::twoPi;
+                    retroBuffer.setSample (0, sample, value);
+                    retroBuffer.setSample (1, sample, value * 0.87f);
+                }
+
+                retroTest.processBlock (retroBuffer, 0.82f);
+
+                bool finite = true;
+                float peak = 0.0f;
+                double energy = 0.0;
+                for (int channel = 0; channel < 2; ++channel)
+                {
+                    const auto* data = retroBuffer.getReadPointer (channel);
+                    for (int sample = 0; sample < retroBuffer.getNumSamples(); ++sample)
+                    {
+                        finite = finite && std::isfinite (data[sample]);
+                        peak = juce::jmax (peak, std::abs (data[sample]));
+                        energy += (double) data[sample] * data[sample];
+                    }
+                }
+
+                const bool latencyWarmup = mode == (int) mfx::RetroMode::Lossy && block < 6;
+                if (! finite || peak > 6.0f || (! latencyWarmup && energy < 1.0e-8))
+                {
+                    std::cout << "  [FAIL] Retro mode " << mode
+                              << " failed finite/bounded/signal checks" << std::endl;
+                    ++failures;
+                    modeFailed = true;
+                    break;
+                }
+            }
+
+            if (modeFailed)
+                continue;
+        }
+
+        for (auto mode : {
+                 mfx::RetroMode::Bitcrush,
+                 mfx::RetroMode::WearAndTear,
+                 mfx::RetroMode::Sp12Bit,
+                 mfx::RetroMode::Tape,
+                 mfx::RetroMode::VinylDust
+             })
+        {
+            retroTest.reset();
+            retroTest.setMode (mode);
+            juce::AudioBuffer<float> transparent (2, 257);
+            juce::AudioBuffer<float> reference (2, 257);
+            for (int sample = 0; sample < 257; ++sample)
+            {
+                const float value = 0.35f * std::sin (
+                    juce::MathConstants<float>::twoPi * 997.0f * (float) sample / 48000.0f);
+                transparent.setSample (0, sample, value);
+                transparent.setSample (1, sample, -value * 0.75f);
+            }
+            reference.makeCopyOf (transparent);
+            retroTest.processBlock (transparent, 0.0f);
+
+            float maximumError = 0.0f;
+            for (int channel = 0; channel < 2; ++channel)
+                for (int sample = 0; sample < 257; ++sample)
+                    maximumError = juce::jmax (
+                        maximumError,
+                        std::abs (transparent.getSample (channel, sample)
+                                  - reference.getSample (channel, sample)));
+
+            if (maximumError > 1.0e-5f)
+            {
+                std::cout << "  [FAIL] Retro mode is not transparent at zero amount"
+                          << std::endl;
+                ++failures;
+            }
+        }
+    }
 
 
     // Block 4 timing choices and absolute Stutter repeat lengths.

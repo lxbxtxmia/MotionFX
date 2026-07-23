@@ -160,7 +160,45 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
         }
         case EffectId::Retro:
             chain.retro.setMode ((mfx::RetroMode) (int) raw ("mode"));
-            chain.retro.setParams (raw ("rate") / 100.0f, raw ("tone") / 100.0f, raw ("mix") / 100.0f);
+            chain.retro.setMix (raw ("mix") / 100.0f);
+            chain.retro.setBitcrushParams (
+                (int) raw ("bits"),
+                raw ("sample_rate"),
+                (int) raw ("bit_hold"),
+                raw ("bit_dither") > 0.5f,
+                raw ("bit_antialias") > 0.5f);
+            chain.retro.setLossyParams (
+                raw ("lossy_bandwidth"),
+                raw ("lossy_detail") / 100.0f,
+                raw ("lossy_damage") / 100.0f,
+                (int) raw ("lossy_quality"),
+                raw ("lossy_stereo_link") > 0.5f);
+            chain.retro.setWearParams (
+                raw ("wow") / 100.0f,
+                raw ("flutter") / 100.0f,
+                raw ("dropout") / 100.0f,
+                raw ("age") / 100.0f,
+                raw ("stereo_drift") / 100.0f);
+            chain.retro.setSpParams (
+                (int) raw ("sp_clock"),
+                (int) raw ("sp_filter"),
+                raw ("sp_filter_cutoff"),
+                raw ("sp_drive") / 100.0f);
+            chain.retro.setTapeParams (
+                (int) raw ("tape_machine"),
+                (int) raw ("tape_speed"),
+                raw ("tape_drive") / 100.0f,
+                raw ("tape_age") / 100.0f,
+                raw ("tape_motion") / 100.0f,
+                raw ("tape_noise") / 100.0f,
+                (int) raw ("tape_nr"),
+                raw ("tape_nr_amount") / 100.0f,
+                raw ("tape_denoise") / 100.0f);
+            chain.retro.setVinylParams (
+                raw ("vinyl_dust") / 100.0f,
+                raw ("vinyl_crackle") / 100.0f,
+                raw ("vinyl_surface") / 100.0f,
+                raw ("vinyl_wear") / 100.0f);
             break;
         case EffectId::Width:
             chain.width.setMode ((mfx::WidthMode) (int) raw ("mode"));
