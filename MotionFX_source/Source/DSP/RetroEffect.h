@@ -141,20 +141,42 @@ namespace mfx
             bitAntiAlias = useAntiAlias;
         }
 
-        void setLossyParams (float bandwidthHzToUse,
-                             float detailToUse,
-                             float damageToUse,
-                             int qualityIndex,
-                             bool stereoLinkToUse) noexcept
+        void setLossyParams (
+            float rangeHzToUse,
+            float detailToUse,
+            float damageToUse,
+            float scrambleToUse,
+            float rateHzToUse,
+            int qualityIndex,
+            bool stereoLinkToUse) noexcept
         {
-            lossyBandwidthHz = juce::jlimit (
+            lossyRangeHz = juce::jlimit (
                 500.0f,
                 24000.0f,
-                bandwidthHzToUse);
-            lossyDetail = juce::jlimit (0.0f, 1.0f, detailToUse);
-            lossyDamage = juce::jlimit (0.0f, 1.0f, damageToUse);
-            lossyQuality = (LossyQuality) juce::jlimit (0, 2, qualityIndex);
-            lossyStereoLink = stereoLinkToUse;
+                rangeHzToUse);
+            lossyDetail = juce::jlimit (
+                0.0f,
+                1.0f,
+                detailToUse);
+            lossyDamage = juce::jlimit (
+                0.0f,
+                1.0f,
+                damageToUse);
+            lossyScramble = juce::jlimit (
+                0.0f,
+                1.0f,
+                scrambleToUse);
+            lossyRateHz = juce::jlimit (
+                0.05f,
+                20.0f,
+                rateHzToUse);
+            lossyQuality = (LossyQuality)
+                juce::jlimit (
+                    0,
+                    2,
+                    qualityIndex);
+            lossyStereoLink =
+                stereoLinkToUse;
         }
 
         void setWearParams (float wowToUse,
@@ -349,7 +371,8 @@ namespace mfx
 
         struct SpectralLossy
         {
-            SpectralLossy (int orderToUse, RetroEffect& ownerToUse)
+            SpectralLossy (int orderToUse,
+                           RetroEffect& ownerToUse)
                 : order (orderToUse),
                   fftSize (1 << orderToUse),
                   hopSize (fftSize / 4),
@@ -362,70 +385,180 @@ namespace mfx
             {
                 sampleRate = sampleRateToUse;
                 const int outputSize = fftSize * 4;
-                for (int channel = 0; channel < 2; ++channel)
+                const int bins = fftSize / 2 + 1;
+
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
                 {
-                    inputRing[(size_t) channel].assign ((size_t) fftSize, 0.0f);
-                    outputRing[(size_t) channel].assign ((size_t) outputSize, 0.0f);
-                    fftData[(size_t) channel].assign ((size_t) fftSize * 2, 0.0f);
+                    inputRing[(size_t) channel].assign (
+                        (size_t) fftSize,
+                        0.0f);
+                    outputRing[(size_t) channel].assign (
+                        (size_t) outputSize,
+                        0.0f);
+                    fftData[(size_t) channel].assign (
+                        (size_t) fftSize * 2,
+                        0.0f);
+                    sourceReal[(size_t) channel].assign (
+                        (size_t) bins,
+                        0.0f);
+                    sourceImaginary[(size_t) channel].assign (
+                        (size_t) bins,
+                        0.0f);
                 }
+
                 window.resize ((size_t) fftSize);
-                for (int index = 0; index < fftSize; ++index)
+
+                for (int index = 0;
+                     index < fftSize;
+                     ++index)
                 {
-                    const float phase = juce::MathConstants<float>::twoPi
-                        * (float) index / (float) fftSize;
-                    window[(size_t) index] = std::sqrt (0.5f - 0.5f * std::cos (phase));
+                    const float phase =
+                        juce::MathConstants<float>::twoPi
+                        * (float) index
+                        / (float) fftSize;
+
+                    // Square-root Hann: the analysis and synthesis windows
+                    // multiply back to Hann. With a 25% hop, four Hann
+                    // windows sum to 2.0, so the overlap factor is 0.5.
+                    window[(size_t) index] =
+                        std::sqrt (
+                            0.5f
+                            - 0.5f
+                                * std::cos (phase));
                 }
+
+                // JUCE may select different FFT engines per platform.
+                // Measure the forward/inverse round-trip once so overlap-add
+                // gain never depends on FFT size or backend normalisation.
+                std::vector<float> probe (
+                    (size_t) fftSize * 2,
+                    0.0f);
+                probe[0] = 1.0f;
+                fft.performRealOnlyForwardTransform (
+                    probe.data(),
+                    true);
+                fft.performRealOnlyInverseTransform (
+                    probe.data());
+
+                const float roundTripGain =
+                    std::abs (probe[0]);
+
+                inverseRoundTripScale =
+                    roundTripGain > 1.0e-9f
+                        ? 1.0f / roundTripGain
+                        : 1.0f / (float) fftSize;
+
+                overlapNormalisation =
+                    inverseRoundTripScale * 0.5f;
+
                 reset();
             }
 
             void reset() noexcept
             {
                 for (auto& ring : inputRing)
-                    std::fill (ring.begin(), ring.end(), 0.0f);
+                    std::fill (
+                        ring.begin(),
+                        ring.end(),
+                        0.0f);
+
                 for (auto& ring : outputRing)
-                    std::fill (ring.begin(), ring.end(), 0.0f);
-                inputWrite = outputRead = 0;
+                    std::fill (
+                        ring.begin(),
+                        ring.end(),
+                        0.0f);
+
+                inputWrite = 0;
+                outputRead = 0;
                 samplesUntilFrame = fftSize;
                 frameCounter = 0;
+                energyCompensation = {
+                    1.0f,
+                    1.0f
+                };
             }
 
-            int getLatencySamples() const noexcept { return fftSize; }
-
-            void process (juce::AudioBuffer<float>& buffer,
-                          float amount,
-                          float bandwidth,
-                          float detail,
-                          float damage,
-                          bool stereoLink) noexcept
+            int getLatencySamples() const noexcept
             {
-                const int channels = juce::jmin (2, buffer.getNumChannels());
-                const int samples = buffer.getNumSamples();
-                const int outputSize = fftSize * 4;
+                return fftSize;
+            }
 
-                for (int sample = 0; sample < samples; ++sample)
+            void process (
+                juce::AudioBuffer<float>& buffer,
+                float amount,
+                float rangeHz,
+                float detail,
+                float damage,
+                float scramble,
+                float rateHz,
+                bool stereoLink) noexcept
+            {
+                const int channels =
+                    juce::jmin (
+                        2,
+                        buffer.getNumChannels());
+                const int samples =
+                    buffer.getNumSamples();
+                const int outputSize =
+                    fftSize * 4;
+
+                for (int sample = 0;
+                     sample < samples;
+                     ++sample)
                 {
-                    for (int channel = 0; channel < channels; ++channel)
+                    for (int channel = 0;
+                         channel < channels;
+                         ++channel)
                     {
-                        auto* data = buffer.getWritePointer (channel);
-                        inputRing[(size_t) channel][(size_t) inputWrite] = data[sample];
-                        data[sample] = outputRing[(size_t) channel][(size_t) outputRead];
-                        outputRing[(size_t) channel][(size_t) outputRead] = 0.0f;
+                        auto* data =
+                            buffer.getWritePointer (
+                                channel);
+
+                        inputRing[(size_t) channel]
+                                 [(size_t) inputWrite] =
+                            data[sample];
+
+                        data[sample] =
+                            outputRing[(size_t) channel]
+                                      [(size_t) outputRead];
+
+                        outputRing[(size_t) channel]
+                                  [(size_t) outputRead] =
+                            0.0f;
                     }
 
-                    inputWrite = (inputWrite + 1) % fftSize;
-                    outputRead = (outputRead + 1) % outputSize;
+                    inputWrite =
+                        (inputWrite + 1)
+                        % fftSize;
+                    outputRead =
+                        (outputRead + 1)
+                        % outputSize;
 
                     if (--samplesUntilFrame <= 0)
                     {
-                        samplesUntilFrame = hopSize;
-                        processFrame (channels, amount, bandwidth, detail, damage, stereoLink);
+                        samplesUntilFrame =
+                            hopSize;
+
+                        processFrame (
+                            channels,
+                            amount,
+                            rangeHz,
+                            detail,
+                            damage,
+                            scramble,
+                            rateHz,
+                            stereoLink);
+
                         ++frameCounter;
                     }
                 }
             }
 
         private:
-            static std::uint32_t hashValue (std::uint32_t value) noexcept
+            static std::uint32_t hashValue (
+                std::uint32_t value) noexcept
             {
                 value ^= value >> 16;
                 value *= 0x7feb352du;
@@ -435,120 +568,658 @@ namespace mfx
                 return value;
             }
 
-            void processFrame (int channels,
-                               float amount,
-                               float bandwidth,
-                               float detail,
-                               float damage,
-                               bool stereoLink) noexcept
+            static float smoothStep (
+                float value) noexcept
             {
-                std::array<float, spectrumBands> inputDisplay {};
-                std::array<float, spectrumBands> outputDisplay {};
-                const int bins = fftSize / 2;
-                const float effectiveBandwidth = juce::jmap (
-                    amount,
-                    juce::jmin (bandwidth, (float) sampleRate * 0.48f),
-                    juce::jmax (700.0f, bandwidth * 0.32f));
-                const float damageAmount = amount * damage;
-                const float detailAmount = juce::jlimit (
-                    0.0f,
-                    1.0f,
-                    1.0f - amount * (1.0f - detail));
-                const float magnitudeSteps = juce::jmap (
-                    detailAmount,
-                    8.0f,
-                    512.0f);
+                const float clamped =
+                    juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        value);
 
-                for (int channel = 0; channel < channels; ++channel)
+                return clamped
+                    * clamped
+                    * (3.0f - 2.0f * clamped);
+            }
+
+            static float interpolate (
+                float a,
+                float b,
+                float amountToUse) noexcept
+            {
+                return a
+                    + (b - a)
+                        * amountToUse;
+            }
+
+            int mappedBin (
+                std::uint64_t mapIndex,
+                int bin,
+                int channel,
+                int activeUpperBin,
+                float scrambleAmount) const noexcept
+            {
+                const std::uint32_t linkChannel =
+                    (std::uint32_t) channel;
+
+                const std::uint32_t noise =
+                    hashValue (
+                        (std::uint32_t) mapIndex
+                            * 2246822519u
+                        ^ (std::uint32_t) bin
+                            * 2654435761u
+                        ^ linkChannel
+                            * 3266489917u);
+
+                const float randomSigned =
+                    (float) (
+                        (int) (noise & 0x0000ffffu)
+                        - 32768)
+                    / 32768.0f;
+
+                const int maximumOffset =
+                    juce::jmax (
+                        1,
+                        juce::roundToInt (
+                            scrambleAmount
+                            * (float) juce::jmin (
+                                96,
+                                juce::jmax (
+                                    2,
+                                    activeUpperBin
+                                        / 3))));
+
+                return juce::jlimit (
+                    1,
+                    activeUpperBin,
+                    bin
+                        + juce::roundToInt (
+                            randomSigned
+                            * (float) maximumOffset));
+            }
+
+            void processFrame (
+                int channels,
+                float amount,
+                float rangeHz,
+                float detail,
+                float damage,
+                float scramble,
+                float rateHz,
+                bool stereoLink) noexcept
+            {
+                std::array<float, spectrumBands>
+                    inputDisplay {};
+                std::array<float, spectrumBands>
+                    outputDisplay {};
+
+                const int nyquistBin =
+                    fftSize / 2;
+                const float nyquistFrequency =
+                    (float) sampleRate * 0.5f;
+                const float safeRange =
+                    juce::jlimit (
+                        80.0f,
+                        nyquistFrequency,
+                        rangeHz);
+                const int activeUpperBin =
+                    juce::jlimit (
+                        2,
+                        nyquistBin,
+                        juce::roundToInt (
+                            safeRange
+                            * (float) fftSize
+                            / (float) sampleRate));
+
+                const float safeAmount =
+                    juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        amount);
+                const float detailLoss =
+                    safeAmount
+                    * (1.0f
+                       - juce::jlimit (
+                           0.0f,
+                           1.0f,
+                           detail));
+                const float damageAmount =
+                    safeAmount
+                    * juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        damage);
+                const float scrambleAmount =
+                    safeAmount
+                    * juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        scramble);
+
+                const float safeRate =
+                    juce::jlimit (
+                        0.05f,
+                        20.0f,
+                        rateHz);
+                const int framesPerMap =
+                    juce::jmax (
+                        1,
+                        juce::roundToInt (
+                            (float) sampleRate
+                            / ((float) hopSize
+                               * safeRate)));
+
+                const std::uint64_t mapIndex =
+                    frameCounter
+                    / (std::uint64_t)
+                        framesPerMap;
+                const float mapProgress =
+                    (float) (
+                        frameCounter
+                        % (std::uint64_t)
+                            framesPerMap)
+                    / (float) framesPerMap;
+                const float mapBlend =
+                    smoothStep (mapProgress);
+
+                const int maximumGroupWidth =
+                    juce::jmax (
+                        1,
+                        activeUpperBin / 20);
+                const int groupWidth =
+                    1
+                    + juce::roundToInt (
+                        detailLoss
+                        * detailLoss
+                        * (float) maximumGroupWidth);
+
+                for (int channel = 0;
+                     channel < channels;
+                     ++channel)
                 {
-                    auto& data = fftData[(size_t) channel];
-                    std::fill (data.begin(), data.end(), 0.0f);
+                    auto& data =
+                        fftData[(size_t) channel];
+                    auto& originalReal =
+                        sourceReal[(size_t) channel];
+                    auto& originalImaginary =
+                        sourceImaginary[(size_t) channel];
 
-                    for (int index = 0; index < fftSize; ++index)
+                    std::fill (
+                        data.begin(),
+                        data.end(),
+                        0.0f);
+
+                    for (int index = 0;
+                         index < fftSize;
+                         ++index)
                     {
-                        const int ringIndex = (inputWrite + index) % fftSize;
-                        data[(size_t) index] = inputRing[(size_t) channel][(size_t) ringIndex]
+                        const int ringIndex =
+                            (inputWrite + index)
+                            % fftSize;
+
+                        data[(size_t) index] =
+                            inputRing[(size_t) channel]
+                                     [(size_t) ringIndex]
                             * window[(size_t) index];
                     }
 
-                    fft.performRealOnlyForwardTransform (data.data(), true);
+                    fft.performRealOnlyForwardTransform (
+                        data.data(),
+                        true);
 
-                    for (int bin = 0; bin <= bins; ++bin)
+                    double inputEnergy = 0.0;
+
+                    for (int bin = 0;
+                         bin <= nyquistBin;
+                         ++bin)
                     {
-                        const bool dcBin = bin == 0;
-                        const bool nyquistBin = bin == bins;
-                        const int realIndex = dcBin ? 0 : (nyquistBin ? 1 : bin * 2);
-                        const int imaginaryIndex = bin * 2 + 1;
-                        const float real = data[(size_t) realIndex];
-                        const float imaginary = (dcBin || nyquistBin)
-                            ? 0.0f
-                            : data[(size_t) imaginaryIndex];
-                        float magnitude = std::sqrt (real * real + imaginary * imaginary);
-                        float phase = std::atan2 (imaginary, real);
-                        const float frequency = (float) bin * (float) sampleRate / (float) fftSize;
+                        const bool dcBin =
+                            bin == 0;
+                        const bool lastBin =
+                            bin == nyquistBin;
+                        const int realIndex =
+                            dcBin
+                                ? 0
+                                : lastBin
+                                    ? 1
+                                    : bin * 2;
+                        const int imaginaryIndex =
+                            bin * 2 + 1;
 
-                        const int displayBand = juce::jlimit (
-                            0,
-                            spectrumBands - 1,
-                            (int) std::floor (
-                                std::log2 (juce::jmax (20.0f, frequency) / 20.0f)
-                                / std::log2 (24000.0f / 20.0f)
-                                * (float) spectrumBands));
-                        inputDisplay[(size_t) displayBand] = juce::jmax (
-                            inputDisplay[(size_t) displayBand],
-                            magnitude);
+                        const float real =
+                            data[(size_t) realIndex];
+                        const float imaginary =
+                            (dcBin || lastBin)
+                                ? 0.0f
+                                : data[(size_t)
+                                    imaginaryIndex];
 
-                        float spectralGain = 1.0f;
-                        if (frequency > effectiveBandwidth)
-                        {
-                            const float octaveDistance = std::log2 (
-                                frequency / juce::jmax (20.0f, effectiveBandwidth));
-                            spectralGain *= std::exp (-octaveDistance * (2.0f + 6.0f * amount));
-                        }
+                        originalReal[(size_t) bin] =
+                            real;
+                        originalImaginary[
+                            (size_t) bin] =
+                            imaginary;
 
-                        const std::uint32_t linkChannel = stereoLink ? 0u : (std::uint32_t) channel;
-                        const std::uint32_t noise = hashValue (
-                            (std::uint32_t) frameCounter * 1315423911u
-                            ^ (std::uint32_t) bin * 2654435761u
-                            ^ linkChannel * 2246822519u);
-                        const float random01 = (float) (noise & 0x00ffffffu) / 16777215.0f;
-                        const float dropoutProbability = damageAmount * damageAmount * 0.38f;
-                        if (random01 < dropoutProbability && bin > 2)
-                            spectralGain *= juce::jmap (damageAmount, 0.32f, 0.0f);
+                        inputEnergy +=
+                            (double) real * real
+                            + (double) imaginary
+                                * imaginary;
 
-                        magnitude *= spectralGain;
-                        if (magnitude > 1.0e-12f)
-                        {
-                            const float logMagnitude = std::log2 (magnitude + 1.0e-12f);
-                            magnitude = std::pow (
-                                2.0f,
-                                std::round (logMagnitude * magnitudeSteps) / magnitudeSteps);
-                        }
+                        const float frequency =
+                            (float) bin
+                            * (float) sampleRate
+                            / (float) fftSize;
 
-                        const float phaseSteps = juce::jmap (
-                            detailAmount,
-                            8.0f,
-                            256.0f);
-                        phase = std::round (
-                            phase / juce::MathConstants<float>::twoPi * phaseSteps)
-                            / phaseSteps * juce::MathConstants<float>::twoPi;
+                        const int displayBand =
+                            juce::jlimit (
+                                0,
+                                spectrumBands - 1,
+                                (int) std::floor (
+                                    std::log2 (
+                                        juce::jmax (
+                                            20.0f,
+                                            frequency)
+                                        / 20.0f)
+                                    / std::log2 (
+                                        24000.0f
+                                        / 20.0f)
+                                    * (float)
+                                        spectrumBands));
 
-                        data[(size_t) realIndex] = magnitude * std::cos (phase);
-                        if (! dcBin && ! nyquistBin)
-                            data[(size_t) imaginaryIndex] = magnitude * std::sin (phase);
-                        outputDisplay[(size_t) displayBand] = juce::jmax (
-                            outputDisplay[(size_t) displayBand],
-                            magnitude);
+                        inputDisplay[
+                            (size_t) displayBand] =
+                            juce::jmax (
+                                inputDisplay[
+                                    (size_t)
+                                        displayBand],
+                                std::sqrt (
+                                    real * real
+                                    + imaginary
+                                        * imaginary));
                     }
 
-                    fft.performRealOnlyInverseTransform (data.data());
+                    double outputEnergy = 0.0;
+                    const int mapChannel =
+                        stereoLink
+                            ? 0
+                            : channel;
 
-                    const float overlapNormalisation = 0.5f / (float) fftSize;
-                    const int outputSize = fftSize * 4;
-                    for (int index = 0; index < fftSize; ++index)
+                    for (int bin = 0;
+                         bin <= nyquistBin;
+                         ++bin)
                     {
-                        const int target = (outputRead + index) % outputSize;
-                        outputRing[(size_t) channel][(size_t) target] +=
+                        const bool dcBin =
+                            bin == 0;
+                        const bool lastBin =
+                            bin == nyquistBin;
+                        const int realIndex =
+                            dcBin
+                                ? 0
+                                : lastBin
+                                    ? 1
+                                    : bin * 2;
+                        const int imaginaryIndex =
+                            bin * 2 + 1;
+
+                        const float originalR =
+                            originalReal[
+                                (size_t) bin];
+                        const float originalI =
+                            originalImaginary[
+                                (size_t) bin];
+
+                        float processedR =
+                            originalR;
+                        float processedI =
+                            originalI;
+
+                        if (! dcBin
+                            && ! lastBin
+                            && bin <= activeUpperBin
+                            && safeAmount
+                                > 1.0e-7f)
+                        {
+                            const int groupedBin =
+                                juce::jlimit (
+                                    1,
+                                    activeUpperBin,
+                                    (bin / groupWidth)
+                                        * groupWidth
+                                        + groupWidth / 2);
+
+                            const float groupedR =
+                                originalReal[
+                                    (size_t)
+                                        groupedBin];
+                            const float groupedI =
+                                originalImaginary[
+                                    (size_t)
+                                        groupedBin];
+
+                            processedR =
+                                interpolate (
+                                    processedR,
+                                    groupedR,
+                                    detailLoss);
+                            processedI =
+                                interpolate (
+                                    processedI,
+                                    groupedI,
+                                    detailLoss);
+
+                            const int mappedA =
+                                mappedBin (
+                                    mapIndex,
+                                    groupedBin,
+                                    mapChannel,
+                                    activeUpperBin,
+                                    scrambleAmount);
+                            const int mappedB =
+                                mappedBin (
+                                    mapIndex + 1u,
+                                    groupedBin,
+                                    mapChannel,
+                                    activeUpperBin,
+                                    scrambleAmount);
+
+                            const float scrambledR =
+                                interpolate (
+                                    originalReal[
+                                        (size_t)
+                                            mappedA],
+                                    originalReal[
+                                        (size_t)
+                                            mappedB],
+                                    mapBlend);
+                            const float scrambledI =
+                                interpolate (
+                                    originalImaginary[
+                                        (size_t)
+                                            mappedA],
+                                    originalImaginary[
+                                        (size_t)
+                                            mappedB],
+                                    mapBlend);
+
+                            processedR =
+                                interpolate (
+                                    processedR,
+                                    scrambledR,
+                                    scrambleAmount);
+                            processedI =
+                                interpolate (
+                                    processedI,
+                                    scrambledI,
+                                    scrambleAmount);
+
+                            const std::uint32_t
+                                damageNoise =
+                                    hashValue (
+                                        (std::uint32_t)
+                                            frameCounter
+                                            * 1315423911u
+                                        ^ (std::uint32_t)
+                                            bin
+                                            * 374761393u
+                                        ^ (std::uint32_t)
+                                            mapChannel
+                                            * 668265263u);
+
+                            const float random01 =
+                                (float) (
+                                    damageNoise
+                                    & 0x00ffffffu)
+                                / 16777215.0f;
+                            const float
+                                dropoutProbability =
+                                    damageAmount
+                                    * damageAmount
+                                    * 0.34f;
+
+                            if (random01
+                                < dropoutProbability
+                                && bin > 2)
+                            {
+                                const float
+                                    retainedGain =
+                                        1.0f
+                                        - 0.94f
+                                            * damageAmount;
+                                processedR *=
+                                    retainedGain;
+                                processedI *=
+                                    retainedGain;
+                            }
+                            else if (damageAmount
+                                     > 1.0e-5f)
+                            {
+                                const int neighbour =
+                                    juce::jlimit (
+                                        1,
+                                        activeUpperBin,
+                                        bin
+                                            + ((damageNoise
+                                                & 1u)
+                                                != 0u
+                                                ? 1
+                                                : -1));
+                                const float merge =
+                                    damageAmount
+                                    * 0.24f;
+
+                                processedR =
+                                    interpolate (
+                                        processedR,
+                                        originalReal[
+                                            (size_t)
+                                                neighbour],
+                                        merge);
+                                processedI =
+                                    interpolate (
+                                        processedI,
+                                        originalImaginary[
+                                            (size_t)
+                                                neighbour],
+                                        merge);
+                            }
+
+                            if (detailLoss
+                                > 1.0e-6f)
+                            {
+                                float magnitude =
+                                    std::sqrt (
+                                        processedR
+                                            * processedR
+                                        + processedI
+                                            * processedI);
+                                float phase =
+                                    std::atan2 (
+                                        processedI,
+                                        processedR);
+
+                                const float
+                                    magnitudeSteps =
+                                        8.0f
+                                        + 4088.0f
+                                            * std::pow (
+                                                1.0f
+                                                    - detailLoss,
+                                                2.0f);
+                                const float
+                                    phaseSteps =
+                                        8.0f
+                                        + 1016.0f
+                                            * std::pow (
+                                                1.0f
+                                                    - detailLoss,
+                                                2.0f);
+
+                                const float
+                                    quantisedMagnitude =
+                                        magnitude
+                                            > 1.0e-12f
+                                            ? std::pow (
+                                                2.0f,
+                                                std::round (
+                                                    std::log2 (
+                                                        magnitude
+                                                        + 1.0e-12f)
+                                                    * magnitudeSteps)
+                                                    / magnitudeSteps)
+                                            : 0.0f;
+
+                                const float
+                                    quantisedPhase =
+                                        std::round (
+                                            phase
+                                            / juce::MathConstants<
+                                                float>::twoPi
+                                            * phaseSteps)
+                                        / phaseSteps
+                                        * juce::MathConstants<
+                                            float>::twoPi;
+
+                                magnitude =
+                                    interpolate (
+                                        magnitude,
+                                        quantisedMagnitude,
+                                        detailLoss);
+                                phase =
+                                    interpolate (
+                                        phase,
+                                        quantisedPhase,
+                                        detailLoss);
+
+                                processedR =
+                                    magnitude
+                                    * std::cos (phase);
+                                processedI =
+                                    magnitude
+                                    * std::sin (phase);
+                            }
+                        }
+
+                        data[(size_t) realIndex] =
+                            processedR;
+
+                        if (! dcBin
+                            && ! lastBin)
+                        {
+                            data[(size_t)
+                                imaginaryIndex] =
+                                processedI;
+                        }
+
+                        outputEnergy +=
+                            (double) processedR
+                                * processedR
+                            + (double) processedI
+                                * processedI;
+                    }
+
+                    const float targetCompensation =
+                        juce::jlimit (
+                            0.63f,
+                            1.58f,
+                            (float) std::sqrt (
+                                inputEnergy
+                                / juce::jmax (
+                                    1.0e-18,
+                                    outputEnergy)));
+
+                    energyCompensation[
+                        (size_t) channel] +=
+                        0.10f
+                        * (targetCompensation
+                           - energyCompensation[
+                               (size_t) channel]);
+
+                    const float appliedCompensation =
+                        1.0f
+                        + safeAmount
+                            * 0.85f
+                            * (energyCompensation[
+                                   (size_t) channel]
+                               - 1.0f);
+
+                    for (int bin = 1;
+                         bin <= nyquistBin;
+                         ++bin)
+                    {
+                        const bool lastBin =
+                            bin == nyquistBin;
+                        const int realIndex =
+                            lastBin
+                                ? 1
+                                : bin * 2;
+                        const int imaginaryIndex =
+                            bin * 2 + 1;
+
+                        data[(size_t) realIndex] *=
+                            appliedCompensation;
+
+                        if (! lastBin)
+                        {
+                            data[(size_t)
+                                imaginaryIndex] *=
+                                appliedCompensation;
+                        }
+
+                        const float real =
+                            data[(size_t) realIndex];
+                        const float imaginary =
+                            lastBin
+                                ? 0.0f
+                                : data[(size_t)
+                                    imaginaryIndex];
+                        const float frequency =
+                            (float) bin
+                            * (float) sampleRate
+                            / (float) fftSize;
+                        const int displayBand =
+                            juce::jlimit (
+                                0,
+                                spectrumBands - 1,
+                                (int) std::floor (
+                                    std::log2 (
+                                        juce::jmax (
+                                            20.0f,
+                                            frequency)
+                                        / 20.0f)
+                                    / std::log2 (
+                                        24000.0f
+                                        / 20.0f)
+                                    * (float)
+                                        spectrumBands));
+
+                        outputDisplay[
+                            (size_t) displayBand] =
+                            juce::jmax (
+                                outputDisplay[
+                                    (size_t)
+                                        displayBand],
+                                std::sqrt (
+                                    real * real
+                                    + imaginary
+                                        * imaginary));
+                    }
+
+                    fft.performRealOnlyInverseTransform (
+                        data.data());
+
+                    const int outputSize =
+                        fftSize * 4;
+
+                    for (int index = 0;
+                         index < fftSize;
+                         ++index)
+                    {
+                        const int target =
+                            (outputRead + index)
+                            % outputSize;
+
+                        outputRing[(size_t) channel]
+                                  [(size_t) target] +=
                             data[(size_t) index]
                             * window[(size_t) index]
                             * overlapNormalisation;
@@ -556,20 +1227,41 @@ namespace mfx
                 }
 
                 float inputPeak = 1.0e-9f;
-                float outputPeak = 1.0e-9f;
-                for (int band = 0; band < spectrumBands; ++band)
+
+                for (int band = 0;
+                     band < spectrumBands;
+                     ++band)
                 {
-                    inputPeak = juce::jmax (inputPeak, inputDisplay[(size_t) band]);
-                    outputPeak = juce::jmax (outputPeak, outputDisplay[(size_t) band]);
+                    inputPeak =
+                        juce::jmax (
+                            inputPeak,
+                            inputDisplay[
+                                (size_t) band]);
                 }
-                for (int band = 0; band < spectrumBands; ++band)
+
+                for (int band = 0;
+                     band < spectrumBands;
+                     ++band)
                 {
-                    owner.uiInputSpectrum[(size_t) band].store (
-                        juce::jlimit (0.0f, 1.0f, inputDisplay[(size_t) band] / inputPeak),
-                        std::memory_order_relaxed);
-                    owner.uiOutputSpectrum[(size_t) band].store (
-                        juce::jlimit (0.0f, 1.0f, outputDisplay[(size_t) band] / inputPeak),
-                        std::memory_order_relaxed);
+                    owner.uiInputSpectrum[
+                        (size_t) band].store (
+                            juce::jlimit (
+                                0.0f,
+                                1.0f,
+                                inputDisplay[
+                                    (size_t) band]
+                                / inputPeak),
+                            std::memory_order_relaxed);
+
+                    owner.uiOutputSpectrum[
+                        (size_t) band].store (
+                            juce::jlimit (
+                                0.0f,
+                                1.0f,
+                                outputDisplay[
+                                    (size_t) band]
+                                / inputPeak),
+                            std::memory_order_relaxed);
                 }
             }
 
@@ -579,10 +1271,27 @@ namespace mfx
             double sampleRate = 44100.0;
             juce::dsp::FFT fft;
             RetroEffect& owner;
-            std::array<std::vector<float>, 2> inputRing;
-            std::array<std::vector<float>, 2> outputRing;
-            std::array<std::vector<float>, 2> fftData;
+
+            std::array<std::vector<float>, 2>
+                inputRing;
+            std::array<std::vector<float>, 2>
+                outputRing;
+            std::array<std::vector<float>, 2>
+                fftData;
+            std::array<std::vector<float>, 2>
+                sourceReal;
+            std::array<std::vector<float>, 2>
+                sourceImaginary;
             std::vector<float> window;
+
+            float inverseRoundTripScale = 1.0f;
+            float overlapNormalisation = 0.5f;
+            std::array<float, 2>
+                energyCompensation {
+                    1.0f,
+                    1.0f
+                };
+
             int inputWrite = 0;
             int outputRead = 0;
             int samplesUntilFrame = 512;
@@ -655,7 +1364,7 @@ namespace mfx
 
                     // Amount zero must be exactly transparent, regardless of
                     // anti-aliasing or the selected hold/interpolation mode.
-                    // Keep the state-aliasing or the selected hold/inter primed with the current signal so that
+                    // Keep the state primed with the current signal so that
                     // re-enabling Bitcrush does not replay a stale sample.
                     if (amount <= 1.0e-6f)
                     {
@@ -693,78 +1402,325 @@ namespace mfx
             }
         }
 
-        void processLossy (juce::AudioBuffer<float>& buffer, float amount) noexcept
+        void processLossy (
+            juce::AudioBuffer<float>& buffer,
+            float amount) noexcept
         {
-            const int index = juce::jlimit (0, 2, (int) lossyQuality);
-            auto& processor = lossyProcessors[(size_t) index];
+            const int index =
+                juce::jlimit (
+                    0,
+                    2,
+                    (int) lossyQuality);
+            auto& processor =
+                lossyProcessors[(size_t) index];
+
             if (processor != nullptr)
+            {
                 processor->process (
                     buffer,
                     amount,
-                    lossyBandwidthHz,
+                    lossyRangeHz,
                     lossyDetail,
                     lossyDamage,
+                    lossyScramble,
+                    lossyRateHz,
                     lossyStereoLink);
+            }
         }
 
-        void processWear (juce::AudioBuffer<float>& buffer, float amount) noexcept
+        void processWear (
+            juce::AudioBuffer<float>& buffer,
+            float amount) noexcept
         {
-            const int samples = buffer.getNumSamples();
-            const int delaySize = motionDelay[0].empty() ? 1 : (int) motionDelay[0].size();
-            const float wowRate = 0.12f + 0.95f * wearWow;
-            const float flutterRate = 4.0f + 11.0f * wearFlutter;
-            const float wowDepth = amount * wearWow * (3.0f + 18.0f * wearAge);
-            const float flutterDepth = amount * wearFlutter * (0.5f + 4.0f * wearAge);
-            const float cutoff = juce::jmap (amount * wearAge, 18000.0f, 3200.0f);
-            const float cutoffCoefficient = onePoleCoefficient (cutoff, (float) sampleRate);
+            const int samples =
+                buffer.getNumSamples();
+            const int delaySize =
+                motionDelay[0].empty()
+                    ? 1
+                    : (int)
+                        motionDelay[0].size();
+            const float rate =
+                (float) sampleRate;
 
-            for (int sample = 0; sample < samples; ++sample)
+            const float wowRate =
+                0.10f
+                + 1.05f
+                    * std::pow (
+                        wearWow,
+                        0.80f);
+            const float flutterRate =
+                3.5f
+                + 13.5f
+                    * std::pow (
+                        wearFlutter,
+                        0.75f);
+
+            // Express depth in milliseconds so 100% remains equally obvious
+            // at every host sample rate.
+            const float wowDepthMs =
+                amount
+                * std::pow (
+                    wearWow,
+                    1.18f)
+                * (0.55f
+                   + 5.45f
+                       * wearAge);
+            const float flutterDepthMs =
+                amount
+                * std::pow (
+                    wearFlutter,
+                    1.12f)
+                * (0.08f
+                   + 1.02f
+                       * wearAge);
+            const float stereoDepthMs =
+                amount
+                * wearStereoDrift
+                * (0.10f
+                   + 0.90f
+                       * wearAge);
+
+            const float baseDelaySamples =
+                8.0f
+                * 0.001f
+                * rate;
+            const float wowDepthSamples =
+                wowDepthMs
+                * 0.001f
+                * rate;
+            const float flutterDepthSamples =
+                flutterDepthMs
+                * 0.001f
+                * rate;
+            const float stereoDepthSamples =
+                stereoDepthMs
+                * 0.001f
+                * rate;
+
+            const float cutoff =
+                juce::jmap (
+                    amount * wearAge,
+                    19000.0f,
+                    2900.0f);
+            const float cutoffCoefficient =
+                onePoleCoefficient (
+                    cutoff,
+                    rate);
+
+            const float dropoutAttackSeconds =
+                0.006f
+                + 0.020f
+                    * (1.0f
+                       - wearDropout);
+            const float dropoutReleaseSeconds =
+                0.085f
+                + 0.170f
+                    * (1.0f
+                       - wearDropout);
+            const float attackCoefficient =
+                1.0f
+                - std::exp (
+                    -1.0f
+                    / juce::jmax (
+                        1.0f,
+                        rate
+                            * dropoutAttackSeconds));
+            const float releaseCoefficient =
+                1.0f
+                - std::exp (
+                    -1.0f
+                    / juce::jmax (
+                        1.0f,
+                        rate
+                            * dropoutReleaseSeconds));
+
+            for (int sample = 0;
+                 sample < samples;
+                 ++sample)
             {
-                for (int channel = 0; channel < 2; ++channel)
-                    motionDelay[(size_t) channel][(size_t) motionWritePosition] = buffer.getSample (channel, sample);
-
-                const float sharedWow = std::sin (wowPhase);
-                const float sharedFlutter = std::sin (flutterPhase)
-                    + 0.35f * std::sin (flutterPhase * 1.73f + 0.7f);
-
-                if (wearDropoutSamples <= 0 && randomUnipolar() < wearDropout * amount * 0.000015f)
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
                 {
-                    wearDropoutSamples = (int) ((0.015f + randomUnipolar() * 0.12f) * (float) sampleRate);
-                    wearDropoutTarget = 0.12f + 0.55f * randomUnipolar();
+                    motionDelay[(size_t) channel]
+                               [(size_t)
+                                    motionWritePosition] =
+                        buffer.getSample (
+                            channel,
+                            sample);
                 }
+
+                const float sharedWow =
+                    std::sin (wowPhase)
+                    + 0.22f
+                        * std::sin (
+                            wowPhase
+                                * 0.47f
+                            + 1.13f);
+                const float sharedFlutter =
+                    std::sin (flutterPhase)
+                    + 0.38f
+                        * std::sin (
+                            flutterPhase
+                                * 1.73f
+                            + 0.70f)
+                    + 0.17f
+                        * std::sin (
+                            flutterPhase
+                                * 2.91f
+                            + 2.20f);
+
+                if (wearDropoutSamples <= 0
+                    && randomUnipolar()
+                        < wearDropout
+                            * amount
+                            * 0.000025f)
+                {
+                    wearDropoutSamples =
+                        (int) (
+                            (0.030f
+                             + randomUnipolar()
+                                 * 0.190f)
+                            * rate);
+                    wearDropoutTarget =
+                        0.02f
+                        + 0.43f
+                            * randomUnipolar();
+                }
+
                 if (wearDropoutSamples > 0)
                 {
                     --wearDropoutSamples;
+
                     if (wearDropoutSamples == 0)
                         wearDropoutTarget = 1.0f;
                 }
-                wearDropoutGain += 0.0035f * (wearDropoutTarget - wearDropoutGain);
 
-                for (int channel = 0; channel < 2; ++channel)
+                const float dropoutCoefficient =
+                    wearDropoutTarget
+                            < wearDropoutGain
+                        ? attackCoefficient
+                        : releaseCoefficient;
+
+                wearDropoutGain +=
+                    dropoutCoefficient
+                    * (wearDropoutTarget
+                       - wearDropoutGain);
+
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
                 {
-                    const float dry = buffer.getSample (channel, sample);
-                    const float drift = channel == 0
-                        ? 0.0f
-                        : wearStereoDrift * (2.2f * std::sin (wowPhase * 0.37f + 1.1f));
-                    const float delaySamples = 40.0f + sharedWow * wowDepth + sharedFlutter * flutterDepth + drift;
-                    float output = readMotionDelay (channel, delaySamples);
-                    output = wearLowpass[(size_t) channel].process (output, cutoffCoefficient);
-                    output *= wearDropoutGain;
-                    output += randomBipolar() * wearAge * amount * 0.006f;
-                    output = dry + amount * (output - dry);
-                    buffer.setSample (channel, sample, flushDenorm (output));
+                    const float dry =
+                        buffer.getSample (
+                            channel,
+                            sample);
+                    const float driftPolarity =
+                        channel == 0
+                            ? -1.0f
+                            : 1.0f;
+                    const float drift =
+                        driftPolarity
+                        * stereoDepthSamples
+                        * std::sin (
+                            wowPhase
+                                * 0.37f
+                            + (channel == 0
+                                ? 0.25f
+                                : 1.55f));
+
+                    const float delaySamples =
+                        baseDelaySamples
+                        + sharedWow
+                            * wowDepthSamples
+                        + sharedFlutter
+                            * flutterDepthSamples
+                        + drift;
+
+                    float output =
+                        readMotionDelay (
+                            channel,
+                            juce::jmax (
+                                1.0f,
+                                delaySamples));
+
+                    output =
+                        wearLowpass[
+                            (size_t) channel]
+                            .process (
+                                output,
+                                cutoffCoefficient);
+                    output *=
+                        wearDropoutGain;
+                    output +=
+                        randomBipolar()
+                        * wearAge
+                        * amount
+                        * 0.0075f;
+
+                    output =
+                        dry
+                        + amount
+                            * (output - dry);
+
+                    buffer.setSample (
+                        channel,
+                        sample,
+                        flushDenorm (output));
                 }
 
-                motionWritePosition = (motionWritePosition + 1) % delaySize;
-                wowPhase += juce::MathConstants<float>::twoPi * wowRate / (float) sampleRate;
-                flutterPhase += juce::MathConstants<float>::twoPi * flutterRate / (float) sampleRate;
-                if (wowPhase >= juce::MathConstants<float>::twoPi)
-                    wowPhase -= juce::MathConstants<float>::twoPi;
-                if (flutterPhase >= juce::MathConstants<float>::twoPi)
-                    flutterPhase -= juce::MathConstants<float>::twoPi;
+                motionWritePosition =
+                    (motionWritePosition + 1)
+                    % delaySize;
 
-                uiMotion.store (juce::jlimit (-1.0f, 1.0f, sharedWow * wearWow + sharedFlutter * wearFlutter * 0.25f), std::memory_order_relaxed);
-                uiDropout.store (1.0f - wearDropoutGain, std::memory_order_relaxed);
+                wowPhase +=
+                    juce::MathConstants<float>::twoPi
+                    * wowRate
+                    / rate;
+                flutterPhase +=
+                    juce::MathConstants<float>::twoPi
+                    * flutterRate
+                    / rate;
+
+                if (wowPhase
+                    >= juce::MathConstants<
+                        float>::twoPi)
+                {
+                    wowPhase -=
+                        juce::MathConstants<
+                            float>::twoPi;
+                }
+
+                if (flutterPhase
+                    >= juce::MathConstants<
+                        float>::twoPi)
+                {
+                    flutterPhase -=
+                        juce::MathConstants<
+                            float>::twoPi;
+                }
+
+                const float displayedMotion =
+                    sharedWow
+                        * wearWow
+                        * 0.72f
+                    + sharedFlutter
+                        * wearFlutter
+                        * 0.28f;
+
+                uiMotion.store (
+                    juce::jlimit (
+                        -1.0f,
+                        1.0f,
+                        displayedMotion),
+                    std::memory_order_relaxed);
+                uiDropout.store (
+                    juce::jlimit (
+                        0.0f,
+                        1.0f,
+                        1.0f
+                            - wearDropoutGain),
+                    std::memory_order_relaxed);
             }
         }
 
@@ -983,9 +1939,11 @@ namespace mfx
         bool bitDither = false;
         bool bitAntiAlias = false;
 
-        float lossyBandwidthHz = 12000.0f;
+        float lossyRangeHz = 12000.0f;
         float lossyDetail = 0.65f;
         float lossyDamage = 0.35f;
+        float lossyScramble = 0.35f;
+        float lossyRateHz = 2.0f;
         LossyQuality lossyQuality = LossyQuality::Normal;
         bool lossyStereoLink = true;
 

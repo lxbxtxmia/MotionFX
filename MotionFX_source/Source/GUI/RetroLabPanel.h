@@ -65,7 +65,7 @@ namespace mfx
             tapeSpeed->combo.setTooltip (
                 "Tape speed changes bandwidth, head bump and mechanical instability.");
             tapeNoiseReduction->combo.setTooltip (
-                "Original B-style/C-style companding inspired by historical tape noise-reduction workflows; not a licensed Dolby implementation.");
+                "Type B applies gentler high-frequency encode/decode companding. Type C applies a stronger extended response.");
 
             lastMode = -1;
             refreshVisibility();
@@ -282,52 +282,138 @@ namespace mfx
                 juce::Justification::bottomRight);
         }
 
-        void drawLossy (juce::Graphics& graphics,
-                        juce::Rectangle<float> area)
+        void drawLossy (
+            juce::Graphics& graphics,
+            juce::Rectangle<float> area)
         {
-            drawModeLabel (graphics, area, "SPECTRAL INPUT / OUTPUT", Palette::purple);
-            area = area.reduced (4.0f, 18.0f);
+            drawModeLabel (
+                graphics,
+                area,
+                "SPECTRAL RANGE / BIN SCRAMBLE",
+                Palette::purple);
+            area = area.reduced (
+                4.0f,
+                18.0f);
+
+            const float range =
+                raw (
+                    "retro_lossy_bandwidth",
+                    12000.0f);
+            const float logarithmicRange =
+                std::log2 (
+                    juce::jmax (
+                        20.0f,
+                        range)
+                    / 20.0f)
+                / std::log2 (
+                    24000.0f
+                    / 20.0f);
+            const float rangeX =
+                area.getX()
+                + juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    logarithmicRange)
+                    * area.getWidth();
+
+            graphics.setColour (
+                Palette::purple.withAlpha (
+                    0.075f));
+            graphics.fillRect (
+                area.withRight (
+                    rangeX));
 
             juce::Path inputPath;
             juce::Path outputPath;
-            for (int band = 0; band < RetroEffect::spectrumBands; ++band)
+
+            for (int band = 0;
+                 band < RetroEffect::spectrumBands;
+                 ++band)
             {
-                const float x = (float) band / (float) (RetroEffect::spectrumBands - 1);
-                const float input = retro.uiInputSpectrum[(size_t) band].load (
-                    std::memory_order_relaxed);
-                const float output = retro.uiOutputSpectrum[(size_t) band].load (
-                    std::memory_order_relaxed);
-                const auto inputPoint = mapPoint (area, x, input * 0.92f);
-                const auto outputPoint = mapPoint (area, x, output * 0.92f);
+                const float x =
+                    (float) band
+                    / (float) (
+                        RetroEffect::spectrumBands
+                        - 1);
+                const float input =
+                    retro.uiInputSpectrum[
+                        (size_t) band].load (
+                            std::memory_order_relaxed);
+                const float output =
+                    retro.uiOutputSpectrum[
+                        (size_t) band].load (
+                            std::memory_order_relaxed);
+                const auto inputPoint =
+                    mapPoint (
+                        area,
+                        x,
+                        input * 0.92f);
+                const auto outputPoint =
+                    mapPoint (
+                        area,
+                        x,
+                        output * 0.92f);
 
                 if (band == 0)
                 {
-                    inputPath.startNewSubPath (inputPoint);
-                    outputPath.startNewSubPath (outputPoint);
+                    inputPath.startNewSubPath (
+                        inputPoint);
+                    outputPath.startNewSubPath (
+                        outputPoint);
                 }
                 else
                 {
-                    inputPath.lineTo (inputPoint);
-                    outputPath.lineTo (outputPoint);
+                    inputPath.lineTo (
+                        inputPoint);
+                    outputPath.lineTo (
+                        outputPoint);
                 }
             }
 
-            graphics.setColour (Palette::textDim.withAlpha (0.55f));
-            graphics.strokePath (inputPath, juce::PathStrokeType (1.2f));
-            graphics.setColour (Palette::purple);
+            graphics.setColour (
+                Palette::textDim.withAlpha (
+                    0.55f));
+            graphics.strokePath (
+                inputPath,
+                juce::PathStrokeType (
+                    1.2f));
+
+            graphics.setColour (
+                Palette::purple);
             graphics.strokePath (
                 outputPath,
-                juce::PathStrokeType (2.0f, juce::PathStrokeType::curved,
-                                      juce::PathStrokeType::rounded));
+                juce::PathStrokeType (
+                    2.0f,
+                    juce::PathStrokeType::curved,
+                    juce::PathStrokeType::rounded));
 
-            const float bandwidth = raw ("retro_lossy_bandwidth", 12000.0f);
-            const float logarithmic = std::log2 (juce::jmax (20.0f, bandwidth) / 20.0f)
-                / std::log2 (24000.0f / 20.0f);
-            const float markerX = area.getX()
-                + juce::jlimit (0.0f, 1.0f, logarithmic) * area.getWidth();
-            graphics.setColour (Palette::purple.withAlpha (0.60f));
+            graphics.setColour (
+                Palette::purple.withAlpha (
+                    0.72f));
             graphics.drawVerticalLine (
-                (int) std::lround (markerX), area.getY(), area.getBottom());
+                (int) std::lround (
+                    rangeX),
+                area.getY(),
+                area.getBottom());
+
+            graphics.setColour (
+                Palette::textDim);
+            graphics.setFont (
+                FontBank::font (
+                    10.5f));
+            graphics.drawText (
+                "RANGE "
+                    + ValueFormatting::frequencyHz (
+                        range,
+                        false)
+                    + "  ·  SCRAMBLE "
+                    + ValueFormatting::percent (
+                        raw (
+                            "retro_lossy_scramble",
+                            35.0f),
+                        false),
+                area.toNearestInt(),
+                juce::Justification::bottomRight);
         }
 
         void drawWear (juce::Graphics& graphics,
@@ -370,10 +456,15 @@ namespace mfx
 
             if (! tape)
             {
-                graphics.setColour (Palette::pink.withAlpha (0.26f + dropout * 0.55f));
-                const float width = area.getWidth() * juce::jlimit (0.0f, 0.35f, dropout);
-                graphics.fillRect (area.withX (area.getCentreX() - width * 0.5f)
-                                           .withWidth (width));
+                graphics.setColour (
+                    Palette::pink.withAlpha (
+                        juce::jlimit (
+                            0.0f,
+                            0.52f,
+                            dropout * 0.52f)));
+                graphics.fillRoundedRectangle (
+                    area,
+                    4.0f);
             }
             else
             {

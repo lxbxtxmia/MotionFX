@@ -171,6 +171,8 @@ void MotionFXAudioProcessor::updateSlot (mfx::EffectId id, const juce::String& p
                 raw ("lossy_bandwidth"),
                 raw ("lossy_detail") / 100.0f,
                 raw ("lossy_damage") / 100.0f,
+                raw ("lossy_scramble") / 100.0f,
+                raw ("lossy_rate"),
                 (int) raw ("lossy_quality"),
                 raw ("lossy_stereo_link") > 0.5f);
             chain.retro.setWearParams (

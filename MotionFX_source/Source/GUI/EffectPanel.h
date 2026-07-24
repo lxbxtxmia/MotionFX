@@ -912,28 +912,30 @@ namespace mfx
 
                 constexpr size_t bits = 0;
                 constexpr size_t sampleRate = 1;
-                constexpr size_t lossyBandwidth = 2;
+                constexpr size_t lossyRange = 2;
                 constexpr size_t lossyDetail = 3;
                 constexpr size_t lossyDamage = 4;
-                constexpr size_t wow = 5;
-                constexpr size_t flutter = 6;
-                constexpr size_t dropout = 7;
-                constexpr size_t age = 8;
-                constexpr size_t stereoDrift = 9;
-                constexpr size_t spClock = 10;
-                constexpr size_t spFilterCutoff = 11;
-                constexpr size_t spDrive = 12;
-                constexpr size_t tapeDrive = 13;
-                constexpr size_t tapeAge = 14;
-                constexpr size_t tapeMotion = 15;
-                constexpr size_t tapeNoise = 16;
-                constexpr size_t tapeNrAmount = 17;
-                constexpr size_t tapeDenoise = 18;
-                constexpr size_t vinylDust = 19;
-                constexpr size_t vinylCrackle = 20;
-                constexpr size_t vinylSurface = 21;
-                constexpr size_t vinylWear = 22;
-                constexpr size_t mixIndex = 23;
+                constexpr size_t lossyScramble = 5;
+                constexpr size_t lossyRate = 6;
+                constexpr size_t wow = 7;
+                constexpr size_t flutter = 8;
+                constexpr size_t dropout = 9;
+                constexpr size_t age = 10;
+                constexpr size_t stereoDrift = 11;
+                constexpr size_t spClock = 12;
+                constexpr size_t spFilterCutoff = 13;
+                constexpr size_t spDrive = 14;
+                constexpr size_t tapeDrive = 15;
+                constexpr size_t tapeAge = 16;
+                constexpr size_t tapeMotion = 17;
+                constexpr size_t tapeNoise = 18;
+                constexpr size_t tapeNrAmount = 19;
+                constexpr size_t tapeDenoise = 20;
+                constexpr size_t vinylDust = 21;
+                constexpr size_t vinylCrackle = 22;
+                constexpr size_t vinylSurface = 23;
+                constexpr size_t vinylWear = 24;
+                constexpr size_t mixIndex = 25;
 
                 auto* mixKnob = show (
                     mixIndex,
@@ -958,17 +960,37 @@ namespace mfx
                 else if (mode == 1)
                 {
                     if (auto* knob = show (
-                            lossyBandwidth,
-                            "BANDWIDTH",
-                            "Upper spectral bandwidth retained by the Lossy processor"))
+                            lossyRange,
+                            "RANGE",
+                            "Upper limit of the spectrum affected by bin processing; frequencies above it pass unchanged"))
                     {
                         knob->setDisplayFunctions (
                             [] (double value) { return ValueFormatting::frequencyHz (value, false); },
                             [] (double value) { return ValueFormatting::frequencyHz (value, true); },
                             [] (const juce::String& text) { return ValueFormatting::parseEngineeringValue (text); });
                     }
-                    show (lossyDetail, "DETAIL", "Magnitude and phase resolution retained per FFT frame");
-                    show (lossyDamage, "DAMAGE", "Probability and depth of deterministic spectral omissions");
+                    show (
+                        lossyDetail,
+                        "RESOLUTION",
+                        "Spectral grouping plus magnitude and phase precision");
+                    show (
+                        lossyDamage,
+                        "DAMAGE",
+                        "Probability and depth of deterministic spectral omissions and bin merging");
+                    show (
+                        lossyScramble,
+                        "SCRAMBLE",
+                        "Distance and intensity of smoothly changing bin redistribution");
+                    if (auto* knob = show (
+                            lossyRate,
+                            "RATE",
+                            "How often the spectral bin map evolves"))
+                    {
+                        knob->setDisplayFunctions (
+                            [] (double value) { return ValueFormatting::frequencyHz (value, false); },
+                            [] (double value) { return ValueFormatting::frequencyHz (value, true); },
+                            [] (const juce::String& text) { return ValueFormatting::parseEngineeringValue (text); });
+                    }
                 }
                 else if (mode == 2)
                 {

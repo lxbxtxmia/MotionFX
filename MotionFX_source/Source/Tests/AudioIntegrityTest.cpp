@@ -183,6 +183,7 @@ int main()
     for (auto* parameterId : {
              "retro_bits", "retro_sample_rate", "retro_bit_hold",
              "retro_lossy_bandwidth", "retro_lossy_detail", "retro_lossy_damage",
+             "retro_lossy_scramble", "retro_lossy_rate",
              "retro_wow", "retro_flutter", "retro_dropout", "retro_age",
              "retro_sp_clock", "retro_sp_filter", "retro_sp_filter_cutoff",
              "retro_tape_machine", "retro_tape_speed", "retro_tape_nr",
@@ -211,7 +212,7 @@ int main()
         retroTest.prepare (48000.0, 257);
         retroTest.setMix (1.0f);
         retroTest.setBitcrushParams (7, 9000.0f, 0, true, true);
-        retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 1, true);
+        retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 0.35f, 2.0f, 1, true);
         retroTest.setWearParams (0.45f, 0.35f, 0.25f, 0.45f, 0.30f);
         retroTest.setSpParams (0, 2, 8000.0f, 0.35f);
         retroTest.setTapeParams (0, 3, 0.45f, 0.30f, 0.25f, 0.18f, 1, 0.70f, 0.25f);
@@ -227,7 +228,7 @@ int main()
         for (int quality = 0; quality < 3; ++quality)
         {
             retroTest.setMode (mfx::RetroMode::Lossy);
-            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, quality, true);
+            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 0.35f, 2.0f, quality, true);
             const int expectedLatency = quality == 0 ? 256 : quality == 1 ? 512 : 1024;
             if (retroTest.getLatencySamples() != expectedLatency)
             {
@@ -241,7 +242,7 @@ int main()
         {
             retroTest.reset();
             retroTest.setMode ((mfx::RetroMode) mode);
-            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 1, true);
+            retroTest.setLossyParams (9000.0f, 0.55f, 0.45f, 0.35f, 2.0f, 1, true);
 
             juce::AudioBuffer<float> retroBuffer (2, 257);
             double phase = 0.0;
@@ -332,6 +333,162 @@ int main()
         }
     }
 
+
+    // 0.10.1 Lossy reconstruction: FFT quality must not change
+    // neutral-path level, and Range must not act as a low-pass filter.
+    {
+        for (int quality = 0;
+             quality < 3;
+             ++quality)
+        {
+            mfx::RetroEffect levelTest;
+            levelTest.prepare (48000.0, 257);
+            levelTest.setMode (
+                mfx::RetroMode::Lossy);
+            levelTest.setMix (1.0f);
+            levelTest.setLossyParams (
+                3000.0f,
+                1.0f,
+                0.0f,
+                0.0f,
+                2.0f,
+                quality,
+                true);
+
+            juce::AudioBuffer<float>
+                levelBuffer (2, 257);
+            double lowPhase = 0.0;
+            double highPhase = 0.0;
+            double inputEnergy = 0.0;
+            double outputEnergy = 0.0;
+            int measuredSamples = 0;
+
+            for (int block = 0;
+                 block < 96;
+                 ++block)
+            {
+                double blockInputEnergy = 0.0;
+
+                for (int sample = 0;
+                     sample < levelBuffer
+                         .getNumSamples();
+                     ++sample)
+                {
+                    const float value =
+                        0.31f
+                            * (float) std::sin (
+                                lowPhase)
+                        + 0.22f
+                            * (float) std::sin (
+                                highPhase);
+
+                    lowPhase +=
+                        juce::MathConstants<
+                            double>::twoPi
+                        * 997.0
+                        / 48000.0;
+                    highPhase +=
+                        juce::MathConstants<
+                            double>::twoPi
+                        * 12000.0
+                        / 48000.0;
+
+                    if (lowPhase
+                        >= juce::MathConstants<
+                            double>::twoPi)
+                    {
+                        lowPhase -=
+                            juce::MathConstants<
+                                double>::twoPi;
+                    }
+
+                    if (highPhase
+                        >= juce::MathConstants<
+                            double>::twoPi)
+                    {
+                        highPhase -=
+                            juce::MathConstants<
+                                double>::twoPi;
+                    }
+
+                    levelBuffer.setSample (
+                        0,
+                        sample,
+                        value);
+                    levelBuffer.setSample (
+                        1,
+                        sample,
+                        value * 0.83f);
+
+                    blockInputEnergy +=
+                        (double) value * value
+                        + (double) (
+                            value * 0.83f)
+                            * (value * 0.83f);
+                }
+
+                levelTest.processBlock (
+                    levelBuffer,
+                    1.0f);
+
+                if (block < 16)
+                    continue;
+
+                inputEnergy +=
+                    blockInputEnergy;
+
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
+                {
+                    const auto* data =
+                        levelBuffer
+                            .getReadPointer (
+                                channel);
+
+                    for (int sample = 0;
+                         sample < levelBuffer
+                             .getNumSamples();
+                         ++sample)
+                    {
+                        outputEnergy +=
+                            (double) data[sample]
+                            * data[sample];
+                    }
+                }
+
+                measuredSamples +=
+                    levelBuffer.getNumSamples()
+                    * 2;
+            }
+
+            juce::ignoreUnused (
+                measuredSamples);
+
+            const double levelDifferenceDb =
+                10.0
+                * std::log10 (
+                    juce::jmax (
+                        1.0e-18,
+                        outputEnergy)
+                    / juce::jmax (
+                        1.0e-18,
+                        inputEnergy));
+
+            if (std::abs (
+                    levelDifferenceDb)
+                > 0.35)
+            {
+                std::cout
+                    << "  [FAIL] Lossy neutral level changed by "
+                    << levelDifferenceDb
+                    << " dB at quality "
+                    << quality
+                    << std::endl;
+                ++failures;
+            }
+        }
+    }
 
     // Block 4 timing choices and absolute Stutter repeat lengths.
     if (mfx::syncDivChoices().size() != mfx::syncDivCount)

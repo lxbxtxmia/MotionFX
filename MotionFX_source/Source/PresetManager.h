@@ -36,7 +36,7 @@ namespace mfx
         }
 
         static juce::File getDefaultPresetDirectory();
-        static juce::String getCurrentSoftwareVersion() { return "0.10.0"; }
+        static juce::String getCurrentSoftwareVersion() { return "0.10.1"; }
         static juce::String getDefaultAuthor();
 
         juce::File getPresetDirectory() const;

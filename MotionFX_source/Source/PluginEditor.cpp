@@ -191,6 +191,8 @@ namespace
                     { "retro_lossy_bandwidth", "BANDWIDTH" },
                     { "retro_lossy_detail", "DETAIL" },
                     { "retro_lossy_damage", "DAMAGE" },
+                    { "retro_lossy_scramble", "SCRAMBLE" },
+                    { "retro_lossy_rate", "RATE" },
                     { "retro_wow", "WOW" },
                     { "retro_flutter", "FLUTTER" },
                     { "retro_dropout", "DROPOUT" },
@@ -676,7 +678,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.10.0 - Build 10
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.10.1 - Build 10.1
 
 Multi-effect modulation VST3.
 
@@ -702,13 +704,21 @@ Retro Lab research basis
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.10.0 - Build 10: Retro Lab
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.10.1 - Build 10.1: Retro correction pass
+- Rebuilt Lossy as real-time spectral bin grouping, scrambling, omissions and phase/magnitude reduction instead of a spectral low-pass.
+- Added FFT-backend calibration and constant-overlap-add normalisation so Eco, Normal and High retain consistent level.
+- Added RANGE, RESOLUTION, DAMAGE, SCRAMBLE and RATE controls plus bounded smoothed energy compensation.
+- Increased the upper range of Wear & Tear wow and flutter while retaining a usable subtle lower range.
+- Reworked dropouts with progressive attack/recovery and a full-panel opacity display.
+- Added cross-quality Lossy reconstruction and high-frequency retention tests.
+
+0.10.0 - Build 10: Retro Lab
 - Rebuilt Retro as six distinct processors: Bitcrush, Lossy, Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
 - Added explicit bit depth, sample-rate hold modes, dither and optional anti-alias filtering.
 - Added a real FFT Lossy processor with Eco/Normal/High quality, bandwidth, detail, damage and stereo-link controls.
 - Added separate wow, flutter, progressive dropout, age and stereo-drift controls.
 - Added an original SP 12-bit real-time model based on the documented 26.04 kHz clock, 12-bit conversion and selectable output-filter families.
-- Added Reel-to-Reel and Cassette tape profiles, five tape speeds, machine-specific noise and B-style/C-style companding-inspired noise reduction.
+- Added Reel-to-Reel and Cassette tape profiles, five tape speeds, machine-specific noise and Type B/Type C companding-inspired noise reduction.
 - Added an adaptive high-band tape denoise control based on public spectral-gating concepts.
 - Added a dedicated Vinyl Dust processor for surface noise and wear without duplicating Groove Phase distortion.
 - Added mode-specific controls, visual feedback, latency reporting and extensive audio integrity tests.

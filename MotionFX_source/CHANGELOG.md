@@ -1,5 +1,16 @@
 # MotionFX changelog
 
+## 0.10.1 - Build 10.1: Retro correction pass
+
+- Rebuilt Lossy around real-time bin grouping, smoothly changing bin redistribution, deterministic omissions and controllable magnitude/phase resolution.
+- Reinterpreted the existing bandwidth parameter as the affected spectral range; frequencies above the selected range are no longer low-pass filtered.
+- Added Scramble and Rate controls.
+- Calibrated FFT round-trip gain and constant-overlap-add reconstruction independently of FFT size and platform backend.
+- Added bounded, smoothed spectral-energy compensation to avoid quality-dependent level drops.
+- Increased the maximum Wear & Tear wow and flutter depth with sample-rate-independent millisecond scaling.
+- Added progressive dropout attack and recovery plus a full-panel opacity visual.
+- Added neutral reconstruction, range-retention and cross-quality level tests.
+
 ## 0.10.0 - Build 10: Retro Lab
 
 - Rebuilt Retro as six distinct processors: Bitcrush, Lossy, Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
@@ -8,7 +19,7 @@
 - Added independent wow, flutter, progressive dropout, age and stereo-drift controls.
 - Added an original real-time SP 12-bit model using the documented 26.04 kHz base clock, 12-bit quantisation and selectable unfiltered/static/dynamic output filtering.
 - Added Reel-to-Reel and Cassette profiles, five tape speeds, distinct noise spectra, head bump, loss, motion and saturation behaviour.
-- Added original B-style/C-style companding-inspired tape noise reduction and an adaptive high-band denoise control.
+- Added original Type B/Type C companding-inspired tape noise reduction and an adaptive high-band denoise control.
 - Added Vinyl Dust for surface noise, crackle, dust and high-frequency wear without duplicating Groove Phase.
 - Added dedicated Retro visualisations, context-sensitive controls, latency reporting and DSP integrity tests.
 - No third-party GPL DSP source was copied; public projects and papers were used as technical references only.

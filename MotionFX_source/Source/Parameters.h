@@ -42,7 +42,7 @@ namespace mfx
     inline juce::StringArray retroSpFilterChoices() { return { "Unfiltered", "Static", "Dynamic" }; }
     inline juce::StringArray retroTapeMachineChoices() { return { "Reel-to-Reel", "Cassette" }; }
     inline juce::StringArray retroTapeSpeedChoices() { return { "1 7/8 IPS", "3 3/4 IPS", "7 1/2 IPS", "15 IPS", "30 IPS" }; }
-    inline juce::StringArray retroTapeNrChoices() { return { "Off", "B-style", "C-style" }; }
+    inline juce::StringArray retroTapeNrChoices() { return { "Off", "Type B", "Type C" }; }
     inline juce::StringArray widthModeChoices() { return { "Stereo Width", "Haas", "Mono Bass", "Phase" }; }
     inline juce::StringArray filterModeChoices() { return { "Low Pass", "High Pass", "Band Pass", "Notch", "Peak", "Comb" }; }
     inline juce::StringArray filterSlopeChoices() { return { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" }; }
@@ -233,7 +233,7 @@ namespace mfx
                     juce::ParameterID ("retro_bit_antialias", 1), "Bit Anti-Alias", false));
 
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
-                    juce::ParameterID ("retro_lossy_bandwidth", 1), "Lossy Bandwidth",
+                    juce::ParameterID ("retro_lossy_bandwidth", 1), "Lossy Spectral Range",
                     juce::NormalisableRange<float> (500.0f, 24000.0f, 0.0f, 0.35f), 12000.0f));
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
                     juce::ParameterID ("retro_lossy_detail", 1), "Lossy Detail",
@@ -241,6 +241,12 @@ namespace mfx
                 parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
                     juce::ParameterID ("retro_lossy_damage", 1), "Lossy Damage",
                     juce::NormalisableRange<float> (0.0f, 100.0f), 35.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_lossy_scramble", 1), "Lossy Bin Scramble",
+                    juce::NormalisableRange<float> (0.0f, 100.0f), 35.0f));
+                parameters.push_back (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID ("retro_lossy_rate", 1), "Lossy Map Rate",
+                    juce::NormalisableRange<float> (0.05f, 20.0f, 0.0f, 0.35f), 2.0f));
                 parameters.push_back (std::make_unique<juce::AudioParameterChoice> (
                     juce::ParameterID ("retro_lossy_quality", 1), "Lossy Quality", retroLossyQualityChoices(), 1));
                 parameters.push_back (std::make_unique<juce::AudioParameterBool> (
