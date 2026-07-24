@@ -1616,6 +1616,14 @@ namespace mfx
                     * (wearDropoutTarget
                        - wearDropoutGain);
 
+                // Shared by both audio channels and the UI dropout meter.
+                // It must live outside the channel loop.
+                const float effectiveDropoutGain =
+                    1.0f
+                    + scale
+                        * (wearDropoutGain
+                           - 1.0f);
+
                 for (int channel = 0;
                      channel < 2;
                      ++channel)
@@ -1668,11 +1676,6 @@ namespace mfx
                         effectiveAge
                         * (filtered - output);
 
-                    const float effectiveDropoutGain =
-                        1.0f
-                        + scale
-                            * (wearDropoutGain
-                               - 1.0f);
                     output *=
                         effectiveDropoutGain;
                     output +=
