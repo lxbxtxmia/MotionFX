@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(MotionFX VERSION 0.10.1)
+project(MotionFX VERSION 0.10.2)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

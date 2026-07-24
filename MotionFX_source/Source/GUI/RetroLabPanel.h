@@ -65,7 +65,7 @@ namespace mfx
             tapeSpeed->combo.setTooltip (
                 "Tape speed changes bandwidth, head bump and mechanical instability.");
             tapeNoiseReduction->combo.setTooltip (
-                "Type B applies gentler high-frequency encode/decode companding. Type C applies a stronger extended response.");
+                "Off disables the combined NR/Denoise path. Type B is gentler; Type C applies a stronger extended response.");
 
             lastMode = -1;
             refreshVisibility();

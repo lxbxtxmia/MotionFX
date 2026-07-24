@@ -58,6 +58,28 @@ namespace
         alert.setColour (
             juce::AlertWindow::outlineColourId,
             Palette::stroke);
+        alert.setColour (
+            juce::Label::textColourId,
+            Palette::text);
+        alert.setColour (
+            juce::TextButton::textColourOffId,
+            Palette::text);
+        alert.setColour (
+            juce::TextButton::textColourOnId,
+            Palette::text);
+        alert.setColour (
+            juce::TextEditor::backgroundColourId,
+            Palette::panel);
+        alert.setColour (
+            juce::TextEditor::textColourId,
+            Palette::text);
+        alert.setColour (
+            juce::TextEditor::outlineColourId,
+            Palette::stroke);
+        alert.setColour (
+            juce::TextEditor::focusedOutlineColourId,
+            Palette::teal);
+        alert.sendLookAndFeelChange();
     }
 
     class AboutDialogContent final : public juce::Component
@@ -678,7 +700,7 @@ void MotionFXAudioProcessorEditor::mouseUp (const juce::MouseEvent& event)
 
 void MotionFXAudioProcessorEditor::showAboutDialog (bool openChangelog)
 {
-    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.10.1 - Build 10.1
+    const auto aboutText = juce::String (R"MFXABOUT(MotionFX 0.10.2 - Build 10.2
 
 Multi-effect modulation VST3.
 
@@ -690,6 +712,7 @@ Built with JUCE 8, C++20, CMake and the VST3 format.
 Interface font
 - Atkinson Hyperlegible Next by the Braille Institute project
 - Embedded under the SIL Open Font License 1.1
+- All labels, values, digits and symbols use the same embedded Next family
 
 Resources
 - JUCE framework
@@ -704,7 +727,15 @@ Retro Lab research basis
 
 Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
 
-    const auto changelogText = juce::String (R"MFXCHANGELOG(0.10.1 - Build 10.1: Retro correction pass
+    const auto changelogText = juce::String (R"MFXCHANGELOG(0.10.2 - Build 10.2: scale, layout and theme correction
+- Changed Retro SCALE into a true parameter scaler: 0% is clean and 100% reaches the user-defined Retro knob values; MIX remains the only dry/wet control.
+- Removed double Amount blending from Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
+- Combined Tape NR Amount and Denoise into one visible NR / DENOISE control while preserving the old hidden denoise parameter for preset compatibility.
+- Fixed Tape control overflow by reducing the visible knob count.
+- Explicitly themed Options and Preset popup menus, preset dialogs, and JUCE title bars used by Accessibility and About.
+- Routed numeric labels through the same embedded Atkinson Hyperlegible Next family as all other interface text.
+
+0.10.1 - Build 10.1: Retro correction pass
 - Rebuilt Lossy as real-time spectral bin grouping, scrambling, omissions and phase/magnitude reduction instead of a spectral low-pass.
 - Added FFT-backend calibration and constant-overlap-add normalisation so Eco, Normal and High retain consistent level.
 - Added RANGE, RESOLUTION, DAMAGE, SCRAMBLE and RATE controls plus bounded smoothed energy compensation.
@@ -827,6 +858,7 @@ Click the MOTIONFX title at any time to reopen this window.)MFXABOUT");
     if (auto* dialog = options.launchAsync())
     {
         dialog->setLookAndFeel (&dialogLookAndFeel());
+        dialog->setBackgroundColour (Palette::bg0);
         dialog->setColour (
             juce::ResizableWindow::backgroundColourId,
             Palette::bg0);
@@ -846,6 +878,7 @@ void MotionFXAudioProcessorEditor::showPresetMenu()
 {
     processor.presetManager.refreshUserPresetList();
     juce::PopupMenu menu;
+    menu.setLookAndFeel (&lookAndFeel);
     int itemId = 1;
 
     menu.addItem (itemId++, "Init", true, processor.presetManager.getCurrentName() == "Init");
@@ -952,6 +985,8 @@ void MotionFXAudioProcessorEditor::savePresetDialog()
         0,
         juce::KeyPress (juce::KeyPress::escapeKey));
 
+    alert->sendLookAndFeelChange();
+
     alert->enterModalState (
         true,
         juce::ModalCallbackFunction::create (
@@ -1014,6 +1049,8 @@ void MotionFXAudioProcessorEditor::createPresetFolderDialog()
         0,
         juce::KeyPress (juce::KeyPress::escapeKey));
 
+    alert->sendLookAndFeelChange();
+
     alert->enterModalState (
         true,
         juce::ModalCallbackFunction::create (
@@ -1049,6 +1086,8 @@ void MotionFXAudioProcessorEditor::showPresetLoadErrorIfAny()
         "OK",
         1,
         juce::KeyPress (juce::KeyPress::returnKey));
+
+    alert->sendLookAndFeelChange();
 
     alert->enterModalState (
         true,
@@ -1088,6 +1127,7 @@ void MotionFXAudioProcessorEditor::showAccessibilityDialog()
     if (auto* dialog = options.launchAsync())
     {
         dialog->setLookAndFeel (&dialogLookAndFeel());
+        dialog->setBackgroundColour (Palette::bg0);
         dialog->setColour (
             juce::ResizableWindow::backgroundColourId,
             Palette::bg0);
@@ -1101,6 +1141,7 @@ void MotionFXAudioProcessorEditor::showAccessibilityDialog()
 void MotionFXAudioProcessorEditor::showOptionsMenu()
 {
     juce::PopupMenu menu;
+    menu.setLookAndFeel (&lookAndFeel);
     juce::PopupMenu scaleMenu;
 
     for (int percent : { 25, 50, 75, 100, 150, 200, 300 })

@@ -358,6 +358,69 @@ namespace mfx
                 0.82f);
         }
 
+        void drawDocumentWindowTitleBar (
+            juce::DocumentWindow& window,
+            juce::Graphics& graphics,
+            int width,
+            int height,
+            int titleSpaceX,
+            int titleSpaceWidth,
+            const juce::Image* icon,
+            bool drawTitleTextOnLeft) override
+        {
+            graphics.fillAll (Palette::bg1);
+            graphics.setColour (
+                Palette::stroke.withAlpha (
+                    Palette::isLight ? 0.78f : 0.92f));
+            graphics.drawHorizontalLine (
+                juce::jmax (0, height - 1),
+                0.0f,
+                (float) width);
+
+            auto titleArea = juce::Rectangle<int> (
+                titleSpaceX,
+                0,
+                titleSpaceWidth,
+                height).reduced (7, 0);
+
+            if (icon != nullptr
+                && icon->isValid())
+            {
+                const int iconSize =
+                    juce::jmax (
+                        0,
+                        height - 10);
+                graphics.drawImageWithin (
+                    *icon,
+                    titleArea.getX(),
+                    titleArea.getCentreY()
+                        - iconSize / 2,
+                    iconSize,
+                    iconSize,
+                    juce::RectanglePlacement::centred,
+                    false);
+                titleArea.removeFromLeft (
+                    iconSize + 6);
+            }
+
+            graphics.setColour (Palette::text);
+            graphics.setFont (
+                FontBank::font (
+                    juce::jlimit (
+                        13.0f,
+                        18.0f,
+                        height * 0.52f),
+                    true));
+            graphics.drawFittedText (
+                window.getName(),
+                titleArea,
+                drawTitleTextOnLeft
+                    ? juce::Justification::centredLeft
+                    : juce::Justification::centred,
+                1,
+                0.88f);
+        }
+
         void drawButtonBackground (
             juce::Graphics& graphics,
             juce::Button& button,
@@ -448,7 +511,7 @@ namespace mfx
                     label.getParentComponent()) != nullptr
                 || (bool) label.getProperties()["mfxNumeric"])
             {
-                return FontBank::numericFont (
+                return FontBank::font (
                     height,
                     label.getFont().isBold());
             }

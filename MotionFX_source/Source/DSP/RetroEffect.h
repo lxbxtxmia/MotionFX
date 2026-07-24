@@ -1441,6 +1441,13 @@ namespace mfx
                         motionDelay[0].size();
             const float rate =
                 (float) sampleRate;
+            const float scale =
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    amount);
+            const float effectiveAge =
+                wearAge * scale;
 
             const float wowRate =
                 0.10f
@@ -1455,33 +1462,35 @@ namespace mfx
                         wearFlutter,
                         0.75f);
 
-            // Express depth in milliseconds so 100% remains equally obvious
-            // at every host sample rate.
             const float wowDepthMs =
-                amount
+                scale
                 * std::pow (
                     wearWow,
                     1.18f)
                 * (0.55f
                    + 5.45f
-                       * wearAge);
+                       * effectiveAge);
             const float flutterDepthMs =
-                amount
+                scale
                 * std::pow (
                     wearFlutter,
                     1.12f)
                 * (0.08f
                    + 1.02f
-                       * wearAge);
+                       * effectiveAge);
             const float stereoDepthMs =
-                amount
+                scale
                 * wearStereoDrift
                 * (0.10f
                    + 0.90f
-                       * wearAge);
+                       * effectiveAge);
 
+            // The Retro Amount control is a parameter scale, not another
+            // dry/wet control. At zero, the virtual transport delay is zero;
+            // at one, the selected motion parameters are reached.
             const float baseDelaySamples =
-                8.0f
+                scale
+                * 8.0f
                 * 0.001f
                 * rate;
             const float wowDepthSamples =
@@ -1499,7 +1508,7 @@ namespace mfx
 
             const float cutoff =
                 juce::jmap (
-                    amount * wearAge,
+                    effectiveAge,
                     19000.0f,
                     2900.0f);
             const float cutoffCoefficient =
@@ -1573,7 +1582,7 @@ namespace mfx
                 if (wearDropoutSamples <= 0
                     && randomUnipolar()
                         < wearDropout
-                            * amount
+                            * scale
                             * 0.000025f)
                 {
                     wearDropoutSamples =
@@ -1638,30 +1647,38 @@ namespace mfx
                         + drift;
 
                     float output =
-                        readMotionDelay (
-                            channel,
-                            juce::jmax (
-                                1.0f,
-                                delaySamples));
+                        scale <= 1.0e-7f
+                            ? dry
+                            : readMotionDelay (
+                                channel,
+                                juce::jmax (
+                                    0.0f,
+                                    delaySamples));
 
-                    output =
+                    const float filtered =
                         wearLowpass[
                             (size_t) channel]
                             .process (
                                 output,
                                 cutoffCoefficient);
+
+                    // Age scales only the head-loss parameter. It is not an
+                    // implicit wet mix for the complete Wear processor.
+                    output +=
+                        effectiveAge
+                        * (filtered - output);
+
+                    const float effectiveDropoutGain =
+                        1.0f
+                        + scale
+                            * (wearDropoutGain
+                               - 1.0f);
                     output *=
-                        wearDropoutGain;
+                        effectiveDropoutGain;
                     output +=
                         randomBipolar()
-                        * wearAge
-                        * amount
+                        * effectiveAge
                         * 0.0075f;
-
-                    output =
-                        dry
-                        + amount
-                            * (output - dry);
 
                     buffer.setSample (
                         channel,
@@ -1701,12 +1718,13 @@ namespace mfx
                 }
 
                 const float displayedMotion =
-                    sharedWow
-                        * wearWow
-                        * 0.72f
-                    + sharedFlutter
-                        * wearFlutter
-                        * 0.28f;
+                    scale
+                    * (sharedWow
+                           * wearWow
+                           * 0.72f
+                       + sharedFlutter
+                           * wearFlutter
+                           * 0.28f);
 
                 uiMotion.store (
                     juce::jlimit (
@@ -1719,56 +1737,164 @@ namespace mfx
                         0.0f,
                         1.0f,
                         1.0f
-                            - wearDropoutGain),
+                            - effectiveDropoutGain),
                     std::memory_order_relaxed);
             }
         }
 
-        void processSp12 (juce::AudioBuffer<float>& buffer, float amount) noexcept
+        void processSp12 (
+            juce::AudioBuffer<float>& buffer,
+            float amount) noexcept
         {
-            const float hostRate = (float) sampleRate;
-            const float targetRate = spEffectiveSampleRate();
-            const float effectiveRate = juce::jmap (amount, hostRate, targetRate);
-            const float increment = effectiveRate / hostRate;
-            const float effectiveBits = juce::jmap (amount, 24.0f, 12.0f);
-            const float inputCutoff = juce::jmin (12000.0f, effectiveRate * 0.46f);
-            const float inputCoefficient = onePoleCoefficient (inputCutoff, hostRate);
+            const float hostRate =
+                (float) sampleRate;
+            const float scale =
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    amount);
+            const float targetRate =
+                spEffectiveSampleRate();
+            const float effectiveRate =
+                juce::jmap (
+                    scale,
+                    hostRate,
+                    targetRate);
+            const float increment =
+                effectiveRate / hostRate;
+            const float effectiveBits =
+                juce::jmap (
+                    scale,
+                    24.0f,
+                    12.0f);
+            const float inputCutoff =
+                juce::jmin (
+                    12000.0f,
+                    effectiveRate * 0.46f);
+            const float inputCoefficient =
+                onePoleCoefficient (
+                    inputCutoff,
+                    hostRate);
 
-            for (int channel = 0; channel < juce::jmin (2, buffer.getNumChannels()); ++channel)
+            for (int channel = 0;
+                 channel < juce::jmin (
+                     2,
+                     buffer.getNumChannels());
+                 ++channel)
             {
-                auto* data = buffer.getWritePointer (channel);
-                auto& state = spState[(size_t) channel];
-                for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-                {
-                    const float input = data[sample];
-                    const float prefiltered = spInputLowpass[(size_t) channel].process (input, inputCoefficient);
-                    const float driven = input + amount * (
-                        std::tanh (prefiltered * (1.0f + spInputDrive * 3.5f)) - input);
+                auto* data =
+                    buffer.getWritePointer (
+                        channel);
+                auto& state =
+                    spState[(size_t) channel];
 
-                    state.phase += increment;
+                for (int sample = 0;
+                     sample < buffer.getNumSamples();
+                     ++sample)
+                {
+                    const float input =
+                        data[sample];
+
+                    if (scale <= 1.0e-7f)
+                    {
+                        state.phase = 1.0;
+                        state.held = input;
+                        data[sample] = input;
+                        continue;
+                    }
+
+                    const float prefiltered =
+                        spInputLowpass[
+                            (size_t) channel]
+                            .process (
+                                input,
+                                inputCoefficient);
+                    const float driveAmount =
+                        spInputDrive * scale;
+                    const float saturated =
+                        std::tanh (
+                            prefiltered
+                            * (1.0f
+                               + driveAmount
+                                   * 3.5f));
+                    const float driven =
+                        input
+                        + driveAmount
+                            * (saturated - input);
+
+                    state.phase +=
+                        increment;
+
                     if (state.phase >= 1.0)
                     {
-                        state.phase -= std::floor (state.phase);
-                        state.held = quantise (driven, effectiveBits, false);
+                        state.phase -=
+                            std::floor (
+                                state.phase);
+                        state.held =
+                            quantise (
+                                driven,
+                                effectiveBits,
+                                false);
                     }
 
-                    float output = state.held;
-                    spEnvelope[(size_t) channel] += 0.002f * (std::abs (output) - spEnvelope[(size_t) channel]);
+                    float output =
+                        state.held;
+                    spEnvelope[
+                        (size_t) channel] +=
+                        0.002f
+                        * (std::abs (output)
+                           - spEnvelope[
+                               (size_t) channel]);
 
-                    if (spFilterMode != SpFilterMode::Unfiltered)
+                    if (spFilterMode
+                        != SpFilterMode::Unfiltered)
                     {
-                        float cutoff = spFilterCutoffHz;
-                        if (spFilterMode == SpFilterMode::Dynamic)
-                            cutoff *= 0.40f + 0.60f * juce::jlimit (0.0f, 1.0f, spEnvelope[(size_t) channel] * 3.0f);
-                        const float coefficient = onePoleCoefficient (cutoff, hostRate);
-                        for (auto& stage : state.filter)
+                        float cutoff =
+                            spFilterCutoffHz;
+
+                        if (spFilterMode
+                            == SpFilterMode::Dynamic)
                         {
-                            stage = coefficient * stage + (1.0f - coefficient) * output;
-                            output = stage;
+                            cutoff *=
+                                0.40f
+                                + 0.60f
+                                    * juce::jlimit (
+                                        0.0f,
+                                        1.0f,
+                                        spEnvelope[
+                                            (size_t)
+                                                channel]
+                                            * 3.0f);
                         }
+
+                        const float coefficient =
+                            onePoleCoefficient (
+                                cutoff,
+                                hostRate);
+                        float filtered =
+                            output;
+
+                        for (auto& stage :
+                             state.filter)
+                        {
+                            stage =
+                                coefficient
+                                    * stage
+                                + (1.0f
+                                   - coefficient)
+                                    * filtered;
+                            filtered = stage;
+                        }
+
+                        // The selected output filter reaches its user value at
+                        // 100% Scale and disappears at 0%.
+                        output +=
+                            scale
+                            * (filtered - output);
                     }
 
-                    data[sample] = flushDenorm (input + amount * (output - input));
+                    data[sample] =
+                        flushDenorm (output);
                 }
             }
         }
@@ -1781,149 +1907,529 @@ namespace mfx
             return speed < 7.5f ? 7.5f : speed;
         }
 
-        void processTape (juce::AudioBuffer<float>& buffer, float amount) noexcept
+        void processTape (
+            juce::AudioBuffer<float>& buffer,
+            float amount) noexcept
         {
-            const int samples = buffer.getNumSamples();
-            const int delaySize = motionDelay[0].empty() ? 1 : (int) motionDelay[0].size();
-            const float speed = tapeSpeedForMachine();
-            const bool cassette = tapeMachine == TapeMachine::Cassette;
-            const float machineMotion = tapeMotion * amount;
-            const float wowRate = cassette ? 0.55f : 0.22f;
-            const float flutterRate = cassette ? 8.7f : 5.2f;
-            const float wowDepth = machineMotion * (cassette ? 18.0f : 7.0f) * std::sqrt (15.0f / speed);
-            const float flutterDepth = machineMotion * (cassette ? 5.0f : 1.8f) * std::sqrt (15.0f / speed);
-            const float cutoff = cassette
-                ? juce::jmap (tapeAge, 14500.0f, 5200.0f) * std::sqrt (speed / 3.75f)
-                : juce::jmap (tapeAge, 20500.0f, 9000.0f) * std::sqrt (speed / 15.0f);
-            const float lossCoefficient = onePoleCoefficient (cutoff, (float) sampleRate);
-            const float headBumpFrequency = cassette ? 115.0f : 72.0f * (15.0f / speed);
-            const float headBumpCoefficient = onePoleCoefficient (headBumpFrequency, (float) sampleRate);
-            const float driveGain = 1.0f + amount * tapeDrive * (cassette ? 5.5f : 3.8f);
-            const float noiseLevel = tapeNoise * amount * (cassette ? 0.018f : 0.006f);
-            const float nrStrengthBase = tapeNoiseReduction == TapeNoiseReduction::BStyle
-                ? 0.55f
-                : tapeNoiseReduction == TapeNoiseReduction::CStyle ? 0.82f : 0.0f;
-            const float nrStrength = nrStrengthBase * tapeNoiseReductionAmount * amount;
+            const int samples =
+                buffer.getNumSamples();
+            const int delaySize =
+                motionDelay[0].empty()
+                    ? 1
+                    : (int)
+                        motionDelay[0].size();
+            const float rate =
+                (float) sampleRate;
+            const float scale =
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    amount);
+            const float speed =
+                tapeSpeedForMachine();
+            const bool cassette =
+                tapeMachine
+                == TapeMachine::Cassette;
 
-            for (int sample = 0; sample < samples; ++sample)
+            const float effectiveDrive =
+                tapeDrive * scale;
+            const float effectiveAge =
+                tapeAge * scale;
+            const float machineMotion =
+                tapeMotion * scale;
+            const float effectiveNoise =
+                tapeNoise * scale;
+
+            const float wowRate =
+                cassette ? 0.55f : 0.22f;
+            const float flutterRate =
+                cassette ? 8.7f : 5.2f;
+            const float wowDepth =
+                machineMotion
+                * (cassette ? 18.0f : 7.0f)
+                * std::sqrt (
+                    15.0f / speed);
+            const float flutterDepth =
+                machineMotion
+                * (cassette ? 5.0f : 1.8f)
+                * std::sqrt (
+                    15.0f / speed);
+
+            const float selectedCutoff =
+                cassette
+                    ? juce::jmap (
+                        effectiveAge,
+                        14500.0f,
+                        5200.0f)
+                        * std::sqrt (
+                            speed / 3.75f)
+                    : juce::jmap (
+                        effectiveAge,
+                        20500.0f,
+                        9000.0f)
+                        * std::sqrt (
+                            speed / 15.0f);
+            const float lossCoefficient =
+                onePoleCoefficient (
+                    selectedCutoff,
+                    rate);
+            const float headBumpFrequency =
+                cassette
+                    ? 115.0f
+                    : 72.0f
+                        * (15.0f / speed);
+            const float headBumpCoefficient =
+                onePoleCoefficient (
+                    headBumpFrequency,
+                    rate);
+            const float driveGain =
+                1.0f
+                + effectiveDrive
+                    * (cassette
+                        ? 5.5f
+                        : 3.8f);
+            const float noiseLevel =
+                effectiveNoise
+                * (cassette
+                    ? 0.018f
+                    : 0.006f);
+
+            const bool typeEnabled =
+                tapeNoiseReduction
+                != TapeNoiseReduction::Off;
+            const float legacyDenoise =
+                tapeDenoise;
+            const float combinedControl =
+                juce::jmax (
+                    typeEnabled
+                        ? tapeNoiseReductionAmount
+                        : 0.0f,
+                    legacyDenoise);
+            const float nrStrengthBase =
+                tapeNoiseReduction
+                        == TapeNoiseReduction::BStyle
+                    ? 0.55f
+                    : tapeNoiseReduction
+                            == TapeNoiseReduction::CStyle
+                        ? 0.82f
+                        : 0.0f;
+            const float nrStrength =
+                nrStrengthBase
+                * combinedControl
+                * scale;
+            const float denoiseStrength =
+                combinedControl
+                * scale;
+
+            for (int sample = 0;
+                 sample < samples;
+                 ++sample)
             {
-                std::array<float, 2> drySamples {};
-                for (int channel = 0; channel < 2; ++channel)
+                std::array<float, 2>
+                    drySamples {};
+
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
                 {
-                    const float input = buffer.getSample (channel, sample);
-                    drySamples[(size_t) channel] = input;
-                    const float nrLow = tapeNrEncodeLow[(size_t) channel].process (
-                        input,
-                        onePoleCoefficient (cassette ? 1200.0f : 1800.0f, (float) sampleRate));
-                    const float nrHigh = input - nrLow;
-                    tapeNrEnvelope[(size_t) channel] += 0.0015f
-                        * (std::abs (nrHigh) - tapeNrEnvelope[(size_t) channel]);
-                    const float lowLevelFactor = 1.0f
-                        - juce::jlimit (0.0f, 1.0f, tapeNrEnvelope[(size_t) channel] * 8.0f);
-                    const float encoded = input + nrHigh * nrStrength * lowLevelFactor * (cassette ? 2.1f : 1.5f);
-                    motionDelay[(size_t) channel][(size_t) motionWritePosition] = encoded;
+                    const float input =
+                        buffer.getSample (
+                            channel,
+                            sample);
+                    drySamples[
+                        (size_t) channel] =
+                        input;
+
+                    const float nrLow =
+                        tapeNrEncodeLow[
+                            (size_t) channel]
+                            .process (
+                                input,
+                                onePoleCoefficient (
+                                    cassette
+                                        ? 1200.0f
+                                        : 1800.0f,
+                                    rate));
+                    const float nrHigh =
+                        input - nrLow;
+
+                    tapeNrEnvelope[
+                        (size_t) channel] +=
+                        0.0015f
+                        * (std::abs (nrHigh)
+                           - tapeNrEnvelope[
+                               (size_t) channel]);
+                    const float lowLevelFactor =
+                        1.0f
+                        - juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            tapeNrEnvelope[
+                                (size_t) channel]
+                            * 8.0f);
+                    const float encoded =
+                        input
+                        + nrHigh
+                            * nrStrength
+                            * lowLevelFactor
+                            * (cassette
+                                ? 2.1f
+                                : 1.5f);
+
+                    motionDelay[
+                        (size_t) channel]
+                               [(size_t)
+                                    motionWritePosition] =
+                        encoded;
                 }
 
-                const float wow = std::sin (wowPhase)
-                    + 0.27f * std::sin (wowPhase * 0.43f + 1.3f);
-                const float flutter = std::sin (flutterPhase)
-                    + 0.28f * std::sin (flutterPhase * 1.89f + 0.4f);
+                const float wow =
+                    std::sin (wowPhase)
+                    + 0.27f
+                        * std::sin (
+                            wowPhase
+                                * 0.43f
+                            + 1.3f);
+                const float flutter =
+                    std::sin (flutterPhase)
+                    + 0.28f
+                        * std::sin (
+                            flutterPhase
+                                * 1.89f
+                            + 0.4f);
 
-                for (int channel = 0; channel < 2; ++channel)
+                for (int channel = 0;
+                     channel < 2;
+                     ++channel)
                 {
-                    const float stereoOffset = channel == 0 ? 0.0f : (cassette ? 0.8f : 0.25f) * machineMotion;
-                    const float delaySamples = 48.0f + wow * wowDepth + flutter * flutterDepth + stereoOffset;
-                    float tapeInput = readMotionDelay (channel, delaySamples);
+                    const float stereoOffset =
+                        channel == 0
+                            ? 0.0f
+                            : (cassette
+                                ? 0.8f
+                                : 0.25f)
+                                * machineMotion;
+                    const float delaySamples =
+                        scale * 48.0f
+                        + wow * wowDepth
+                        + flutter
+                            * flutterDepth
+                        + stereoOffset;
+                    float tapeInput =
+                        scale <= 1.0e-7f
+                            ? drySamples[
+                                (size_t) channel]
+                            : readMotionDelay (
+                                channel,
+                                juce::jmax (
+                                    0.0f,
+                                    delaySamples));
 
-                    tapeMemory[(size_t) channel] += (cassette ? 0.024f : 0.012f)
-                        * (tapeInput - tapeMemory[(size_t) channel]);
-                    const float magneticInput = tapeInput * driveGain
-                        + tapeMemory[(size_t) channel] * tapeAge * 0.35f;
-                    float output = std::tanh (magneticInput)
-                        / juce::jmax (0.001f, std::tanh (driveGain));
+                    tapeMemory[
+                        (size_t) channel] +=
+                        (cassette
+                            ? 0.024f
+                            : 0.012f)
+                        * (tapeInput
+                           - tapeMemory[
+                               (size_t) channel]);
 
-                    const float bumpLow = tapeHeadBumpLow[(size_t) channel].process (output, headBumpCoefficient);
-                    const float bumpBand = bumpLow - tapeHeadBumpBand[(size_t) channel].process (bumpLow, headBumpCoefficient);
-                    output += bumpBand * amount * (cassette ? 0.08f : 0.18f) * (1.0f - speed / 45.0f);
-                    output = tapeLowpass[(size_t) channel].process (output, lossCoefficient);
+                    const float magneticInput =
+                        tapeInput
+                        + tapeMemory[
+                            (size_t) channel]
+                            * effectiveAge
+                            * 0.35f;
+                    const float saturated =
+                        std::tanh (
+                            magneticInput
+                            * driveGain)
+                        / juce::jmax (
+                            0.001f,
+                            std::tanh (
+                                driveGain));
+                    float output =
+                        magneticInput
+                        + effectiveDrive
+                            * (saturated
+                               - magneticInput);
 
-                    float noise = randomBipolar();
-                    tapeNoiseLow[(size_t) channel] += 0.04f * (noise - tapeNoiseLow[(size_t) channel]);
+                    const float bumpLow =
+                        tapeHeadBumpLow[
+                            (size_t) channel]
+                            .process (
+                                output,
+                                headBumpCoefficient);
+                    const float bumpBand =
+                        bumpLow
+                        - tapeHeadBumpBand[
+                            (size_t) channel]
+                            .process (
+                                bumpLow,
+                                headBumpCoefficient);
+                    output +=
+                        bumpBand
+                        * scale
+                        * (cassette
+                            ? 0.08f
+                            : 0.18f)
+                        * (1.0f
+                           - speed / 45.0f);
+
+                    const float filtered =
+                        tapeLowpass[
+                            (size_t) channel]
+                            .process (
+                                output,
+                                lossCoefficient);
+                    output +=
+                        effectiveAge
+                        * (filtered - output);
+
+                    float noise =
+                        randomBipolar();
+                    tapeNoiseLow[
+                        (size_t) channel] +=
+                        0.04f
+                        * (noise
+                           - tapeNoiseLow[
+                               (size_t)
+                                   channel]);
+
                     if (cassette)
-                        noise -= tapeNoiseLow[(size_t) channel] * 0.82f;
+                    {
+                        noise -=
+                            tapeNoiseLow[
+                                (size_t) channel]
+                            * 0.82f;
+                    }
                     else
-                        noise = tapeNoiseLow[(size_t) channel] * 0.58f + noise * 0.42f;
-                    output += noise * noiseLevel;
+                    {
+                        noise =
+                            tapeNoiseLow[
+                                (size_t) channel]
+                                * 0.58f
+                            + noise * 0.42f;
+                    }
 
-                    const float decodedLow = tapeNrDecodeLow[(size_t) channel].process (
-                        output,
-                        onePoleCoefficient (cassette ? 1200.0f : 1800.0f, (float) sampleRate));
-                    float decodedHigh = output - decodedLow;
-                    const float decodeEnvelope = std::abs (decodedHigh);
-                    const float decodeLowLevel = 1.0f
-                        - juce::jlimit (0.0f, 1.0f, decodeEnvelope * 8.0f);
-                    decodedHigh /= 1.0f + nrStrength * decodeLowLevel * (cassette ? 2.1f : 1.5f);
-                    output = decodedLow + decodedHigh;
+                    output +=
+                        noise * noiseLevel;
 
-                    tapeDenoiseEnvelope[(size_t) channel] += 0.0008f
-                        * (std::abs (decodedHigh) - tapeDenoiseEnvelope[(size_t) channel]);
-                    const float denoiseThreshold = cassette ? 0.018f : 0.007f;
-                    const float denoiseGate = juce::jlimit (
-                        0.0f,
-                        1.0f,
-                        tapeDenoiseEnvelope[(size_t) channel] / denoiseThreshold);
-                    output = decodedLow + decodedHigh
-                        * juce::jmap (tapeDenoise * amount, 1.0f, denoiseGate);
-                    output = drySamples[(size_t) channel]
-                        + amount * (output - drySamples[(size_t) channel]);
+                    const float decodedLow =
+                        tapeNrDecodeLow[
+                            (size_t) channel]
+                            .process (
+                                output,
+                                onePoleCoefficient (
+                                    cassette
+                                        ? 1200.0f
+                                        : 1800.0f,
+                                    rate));
+                    float decodedHigh =
+                        output - decodedLow;
+                    const float decodeEnvelope =
+                        std::abs (
+                            decodedHigh);
+                    const float decodeLowLevel =
+                        1.0f
+                        - juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            decodeEnvelope
+                            * 8.0f);
+                    decodedHigh /=
+                        1.0f
+                        + nrStrength
+                            * decodeLowLevel
+                            * (cassette
+                                ? 2.1f
+                                : 1.5f);
+                    output =
+                        decodedLow
+                        + decodedHigh;
 
-                    buffer.setSample (channel, sample, flushDenorm (output));
+                    tapeDenoiseEnvelope[
+                        (size_t) channel] +=
+                        0.0008f
+                        * (std::abs (
+                               decodedHigh)
+                           - tapeDenoiseEnvelope[
+                               (size_t)
+                                   channel]);
+                    const float
+                        denoiseThreshold =
+                            cassette
+                                ? 0.018f
+                                : 0.007f;
+                    const float denoiseGate =
+                        juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            tapeDenoiseEnvelope[
+                                (size_t) channel]
+                            / denoiseThreshold);
+                    output =
+                        decodedLow
+                        + decodedHigh
+                            * juce::jmap (
+                                denoiseStrength,
+                                1.0f,
+                                denoiseGate);
+
+                    buffer.setSample (
+                        channel,
+                        sample,
+                        flushDenorm (output));
                 }
 
-                motionWritePosition = (motionWritePosition + 1) % delaySize;
-                wowPhase += juce::MathConstants<float>::twoPi * wowRate / (float) sampleRate;
-                flutterPhase += juce::MathConstants<float>::twoPi * flutterRate / (float) sampleRate;
-                if (wowPhase >= juce::MathConstants<float>::twoPi)
-                    wowPhase -= juce::MathConstants<float>::twoPi;
-                if (flutterPhase >= juce::MathConstants<float>::twoPi)
-                    flutterPhase -= juce::MathConstants<float>::twoPi;
+                motionWritePosition =
+                    (motionWritePosition + 1)
+                    % delaySize;
+                wowPhase +=
+                    juce::MathConstants<float>::twoPi
+                    * wowRate
+                    / rate;
+                flutterPhase +=
+                    juce::MathConstants<float>::twoPi
+                    * flutterRate
+                    / rate;
 
-                uiMotion.store (juce::jlimit (-1.0f, 1.0f, wow * 0.75f + flutter * 0.25f), std::memory_order_relaxed);
+                if (wowPhase
+                    >= juce::MathConstants<
+                        float>::twoPi)
+                {
+                    wowPhase -=
+                        juce::MathConstants<
+                            float>::twoPi;
+                }
+
+                if (flutterPhase
+                    >= juce::MathConstants<
+                        float>::twoPi)
+                {
+                    flutterPhase -=
+                        juce::MathConstants<
+                            float>::twoPi;
+                }
+
+                uiMotion.store (
+                    juce::jlimit (
+                        -1.0f,
+                        1.0f,
+                        scale
+                        * (wow * 0.75f
+                           + flutter
+                               * 0.25f)),
+                    std::memory_order_relaxed);
             }
         }
 
-        void processVinyl (juce::AudioBuffer<float>& buffer, float amount) noexcept
+        void processVinyl (
+            juce::AudioBuffer<float>& buffer,
+            float amount) noexcept
         {
-            const float cutoff = juce::jmap (vinylWear * amount, 19000.0f, 5500.0f);
-            const float coefficient = onePoleCoefficient (cutoff, (float) sampleRate);
-            const float surfaceLevel = vinylSurface * amount * 0.012f;
+            const float scale =
+                juce::jlimit (
+                    0.0f,
+                    1.0f,
+                    amount);
+            const float effectiveWear =
+                vinylWear * scale;
+            const float cutoff =
+                juce::jmap (
+                    effectiveWear,
+                    19000.0f,
+                    5500.0f);
+            const float coefficient =
+                onePoleCoefficient (
+                    cutoff,
+                    (float) sampleRate);
+            const float surfaceLevel =
+                vinylSurface
+                * scale
+                * 0.012f;
 
-            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            for (int sample = 0;
+                 sample < buffer.getNumSamples();
+                 ++sample)
             {
-                const bool dustEvent = randomUnipolar() < vinylDust * amount * 0.00008f;
-                const bool crackleEvent = randomUnipolar() < vinylCrackle * amount * 0.00045f;
+                const bool dustEvent =
+                    randomUnipolar()
+                    < vinylDust
+                        * scale
+                        * 0.00008f;
+                const bool crackleEvent =
+                    randomUnipolar()
+                    < vinylCrackle
+                        * scale
+                        * 0.00045f;
 
-                for (int channel = 0; channel < juce::jmin (2, buffer.getNumChannels()); ++channel)
+                for (int channel = 0;
+                     channel < juce::jmin (
+                         2,
+                         buffer.getNumChannels());
+                     ++channel)
                 {
-                    const float dry = buffer.getSample (channel, sample);
-                    float output = vinylLowpass[(size_t) channel].process (dry, coefficient);
+                    const float dry =
+                        buffer.getSample (
+                            channel,
+                            sample);
+                    const float filtered =
+                        vinylLowpass[
+                            (size_t) channel]
+                            .process (
+                                dry,
+                                coefficient);
+                    float output =
+                        dry
+                        + effectiveWear
+                            * (filtered - dry);
 
-                    float surface = randomBipolar();
-                    const float surfaceLow = vinylHighpassLow[(size_t) channel].process (
-                        surface,
-                        onePoleCoefficient (1800.0f, (float) sampleRate));
-                    surface -= surfaceLow;
+                    float surface =
+                        randomBipolar();
+                    const float surfaceLow =
+                        vinylHighpassLow[
+                            (size_t) channel]
+                            .process (
+                                surface,
+                                onePoleCoefficient (
+                                    1800.0f,
+                                    (float)
+                                        sampleRate));
+                    surface -=
+                        surfaceLow;
 
                     if (dustEvent)
-                        vinylCrackleEnvelope[(size_t) channel] += randomBipolar() * 0.25f;
-                    if (crackleEvent)
-                        vinylCrackleEnvelope[(size_t) channel] += randomBipolar() * 0.65f;
-                    vinylCrackleEnvelope[(size_t) channel] *= 0.91f;
+                    {
+                        vinylCrackleEnvelope[
+                            (size_t) channel] +=
+                            randomBipolar()
+                            * 0.25f;
+                    }
 
-                    output += surface * surfaceLevel
-                        + vinylCrackleEnvelope[(size_t) channel];
-                    output = dry + amount * (output - dry);
-                    buffer.setSample (channel, sample, flushDenorm (output));
+                    if (crackleEvent)
+                    {
+                        vinylCrackleEnvelope[
+                            (size_t) channel] +=
+                            randomBipolar()
+                            * 0.65f;
+                    }
+
+                    vinylCrackleEnvelope[
+                        (size_t) channel] *=
+                        0.91f;
+
+                    output +=
+                        surface
+                            * surfaceLevel
+                        + vinylCrackleEnvelope[
+                            (size_t) channel]
+                            * scale;
+
+                    buffer.setSample (
+                        channel,
+                        sample,
+                        flushDenorm (output));
                 }
             }
         }

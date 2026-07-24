@@ -1,5 +1,16 @@
 # MotionFX changelog
 
+## 0.10.2 - Build 10.2: scale, layout and theme correction
+
+- Changed the Retro primary control from an implicit second dry/wet stage to a true parameter scale.
+- At 0% Scale, Retro is clean; at 100%, each mode reaches the values selected on its knobs.
+- Kept Retro Mix as the only dry/wet control.
+- Removed double Amount blending from Wear & Tear, SP 12-Bit, Tape and Vinyl Dust.
+- Combined the visible Tape NR Amount and Denoise controls into one NR / DENOISE knob while retaining old preset data compatibility.
+- Fixed Tape knob overflow.
+- Applied the active MotionFX palette to Options, Preset menus, preset dialogs and non-native Accessibility/About title bars.
+- Routed numeric labels, digits and symbols through the embedded Atkinson Hyperlegible Next family.
+
 ## 0.10.1 - Build 10.1: Retro correction pass
 
 - Rebuilt Lossy around real-time bin grouping, smoothly changing bin redistribution, deterministic omissions and controllable magnitude/phase resolution.

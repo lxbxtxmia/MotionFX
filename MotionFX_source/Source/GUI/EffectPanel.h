@@ -288,9 +288,9 @@ namespace mfx
                     break;
 
                 case EffectId::Retro:
-                    primaryKnob->setLabelText ("AMOUNT");
+                    primaryKnob->setLabelText ("SCALE");
                     primaryKnob->setTooltipText (
-                        "Intensity of the selected Retro process");
+                        "Scales all selected Retro parameters from clean at 0% to the knob values at 100%; use MIX for dry/wet");
                     break;
 
                 case EffectId::Width:
@@ -1040,8 +1040,10 @@ namespace mfx
                     show (tapeAge, "AGE", "Head loss, memory and high-frequency wear");
                     show (tapeMotion, "MOTION", "Wow, flutter and channel instability");
                     show (tapeNoise, "NOISE", "Machine-specific tape hiss and low-frequency noise");
-                    show (tapeNrAmount, "NR AMOUNT", "Strength of the B-style or C-style companding path");
-                    show (tapeDenoise, "DENOISE", "Adaptive high-band gate for generated tape noise");
+                    show (
+                        tapeNrAmount,
+                        "NR / DENOISE",
+                        "With Type B or Type C, controls both the encode/decode companding strength and adaptive high-band denoising");
                 }
                 else
                 {
